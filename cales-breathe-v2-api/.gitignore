@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+.env
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+uploads/
+
+# Google Service Account 金鑰（敏感，勿 commit）
+*.json
+
+# Local scratch / debug (do not commit)
+note.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

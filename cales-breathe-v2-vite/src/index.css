@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+.leckerli-one-regular {
+    font-family: "Leckerli One", cursive;
+    font-weight: 400;
+    font-style: normal;
+  }
+  
+  .noto-sans-tc-regular {
+    font-family: "Noto Sans TC", sans-serif;
+    font-optical-sizing: auto;
+    font-weight: 400;
+    font-style: normal;
+  }
+
+  #customerPic {
+    position: relative;
+  }
+  
+  #customerPic:hover::after {
+    content: "變更圖像";
+    position: absolute;
+    bottom: -10px; /* 顯示在圖片下方 */
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 5px;
+    border-radius: 5px;
+    font-size: 13px;
+    visibility: visible;
+  }
+  
+  #customerPic::after {
+    visibility: hidden;
+  }
+
+html {
+  scroll-behavior: smooth;
+}
+
+@font-face {
+  font-family: 'ChenYuluoyanThin'; /* 自定義名稱，用來在 CSS 中引用 */
+  src: url('../fonts/ChenYuluoyan-Thin-Monospaced.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+.ChenYuluoyanThin {
+  font-family: 'ChenYuluoyanThin', sans-serif;
+  font-weight: normal;
+  font-style: normal;
+
+}
