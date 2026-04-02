@@ -223,7 +223,15 @@ async def lifespan(app: FastAPI):
         pass
 
 
-app = FastAPI(title="Cale's Breathe API", version="0.1.0", lifespan=lifespan)
+# Docker gateway 會把外部路徑 `/api/*` 反代到後端 FastAPI 的根路徑。
+# 設定 root_path 讓 OpenAPI/Swagger 產生的 servers/base URL 正確帶上 `/api`，
+# 例如 Swagger UI 的 Execute 會呼叫 `/api/services` 而不是 `/services`。
+app = FastAPI(
+    title="Cale's Breathe API",
+    version="0.1.0",
+    lifespan=lifespan,
+    root_path="/api",
+)
 
 def _allowed_origins() -> list[str]:
     origins = [

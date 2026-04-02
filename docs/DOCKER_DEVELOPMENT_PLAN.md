@@ -8,7 +8,7 @@
 
 | 階段 | 目標 |
 |------|------|
-| **A. 本機 Docker** | 單一指令啟動 Postgres、FastAPI、NGINX（靜態 + `/api/` 反代），瀏覽器可驗證主要流程。 |
+| **A. 本機 Docker** | 單一指令啟動 **Postgres、FastAPI、`cales-breathe-v2-vite` 前端（Vite 產物）、NGINX 閘道**；閘道於 `/` 提供 SPA、`/api/` 反代至後端，瀏覽器可驗證主要流程。 |
 | **B. 本機 OAuth／Bot** | Google／LINE Login 以登記之 callback 測通；LINE Messaging Webhook 以 **HTTPS 隧道**（如 ngrok）測通。 |
 | **C. 正式佈署** | 同一套 compose 概念遷至 GCP VM（或抽換為 production 設定）：網域、HTTPS、備份。 |
 
@@ -19,7 +19,7 @@
 ```mermaid
 flowchart LR
   browser[Browser]
-  gateway[gateway_NGINX]
+  gateway["gateway：Vite 前端靜態檔 + NGINX /api 反代"]
   api[api_FastAPI]
   pg[(postgres)]
   vol[Volume_uploads]
@@ -29,10 +29,17 @@ flowchart LR
   api --> vol
 ```
 
-gateway 同時於 `/` 提供 Vite 靜態檔（圖中略繪）。
+`gateway` 映像於建置階段編譯 [`cales-breathe-v2-vite`](../cales-breathe-v2-vite)，將 `dist` 置於 NGINX `root`，故 **Docker Compose 已涵蓋前端**（無須另開 `npm run dev` 容器即可用瀏覽器驗證整站）。
 
-- **gateway**：建置自 [`deploy/Dockerfile`](../deploy/Dockerfile)，內含 Vite `dist` 與 [`deploy/nginx.conf`](../deploy/nginx.conf)。
-- **api**：[`cales-breathe-v2-api/Dockerfile`](../cales-breathe-v2-api/Dockerfile)；`DATABASE_URL` 由 Compose 覆寫為連 **postgres** 服務。
+### Compose 服務一覽
+
+| 服務 | 說明 |
+|------|------|
+| **postgres** | PostgreSQL 16 |
+| **api** | FastAPI（[`cales-breathe-v2-api/Dockerfile`](../cales-breathe-v2-api/Dockerfile)） |
+| **gateway** | 多階段映像（[`deploy/Dockerfile`](../deploy/Dockerfile)）：**Node 建置 Vite** → **NGINX** 服務靜態檔 + [`deploy/nginx.conf`](../deploy/nginx.conf) 之 `/api/` 反代 |
+
+- **api**：`DATABASE_URL` 由 Compose 覆寫為連 **postgres** 服務。
 - **postgres**：資料持久化於 named volume `postgres_data`；上傳檔於 `api_uploads`。
 
 ---
@@ -141,7 +148,7 @@ LINE 需 **HTTPS 公網**；本機請使用 **ngrok**、**Cloudflare Tunnel** �
 ## 9. 檢查清單（上線前）
 
 - [ ] 根目錄與 `api` 之 `.env` 未提交版本庫。
-- [ ] `docker compose up` 後 `/api/health` 可連線。
+- [ ] `docker compose up` 後 `/api/health` 可連線，且 **gateway 根路徑 `/`** 可載入 Vite 前端（非僅 API）。
 - [ ] 上傳／圖片（若 `STORAGE_BACKEND=local`）寫入 volume，重建容器後仍存在。
 - [ ] OAuth／LINE／Webhook 後台 URL 與執行環境一致。
 - [ ] 正式環境已規劃 Postgres 與 `uploads` 備份策略。
@@ -152,8 +159,10 @@ LINE 需 **HTTPS 公網**；本機請使用 **ngrok**、**Cloudflare Tunnel** �
 
 | 路徑 | 說明 |
 |------|------|
-| [`../docker-compose.yml`](../docker-compose.yml) | 服務定義 |
+| [`../docker-compose.yml`](../docker-compose.yml) | 服務定義（**gateway = 前端建置 + NGINX**） |
+| [`../deploy/Dockerfile`](../deploy/Dockerfile) | Vite 建置與 NGINX 映像 |
 | [`../deploy/nginx.conf`](../deploy/nginx.conf) | 閘道路由 |
+| [`../cales-breathe-v2-vite/`](../cales-breathe-v2-vite/) | 前端原始碼（由 `deploy/Dockerfile` 納入建置） |
 | [`../.env.example`](../.env.example) | Compose／建置變數範例 |
 | [`cales-breathe-v2-api/.env.example`](../cales-breathe-v2-api/.env.example) | 後端完整變數範例 |
 

@@ -29,6 +29,7 @@ services:
       postgres:
         condition: service_healthy
 
+  # 前端：cales-breathe-v2-vite 於 deploy/Dockerfile 內 npm run build，NGINX 於 / 提供 dist
   gateway:
     build:
       context: .

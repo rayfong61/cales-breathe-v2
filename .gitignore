@@ -1,0 +1,61 @@
+# ============================================================
+# Monorepo ignore（FastAPI + Vite + Docker）
+# ============================================================
+
+# --- Environment variables ---
+.env
+.env.*
+
+!/.env.example
+**/.env
+**/.env.*
+
+!**/.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+venv/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Docker / Logs ---
+*.log
+
+# --- Node / Vite / React ---
+node_modules/
+.pnp
+.pnp.js
+dist/
+dist-ssr/
+build/
+.cache/
+.vite/
+out/
+coverage/
+*.tsbuildinfo
+
+# --- IDE ---
+.idea/
+.vscode/
+.swp
+.swo
+.DS_Store
+Thumbs.db
+
+# --- api service local artifacts ---
+cales-breathe-v2-api/uploads/
+cales-breathe-v2-api/app.db
+
+# --- Git metadata accidentally created inside subfolders ---
+**/.git/
+
