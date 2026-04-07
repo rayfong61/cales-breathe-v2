@@ -95,10 +95,31 @@ gcloud run deploy cales-breathe-api --image asia-east1-docker.pkg.dev/cale-45840
 
 ## 7. 常用排查指令
 
+Cloud Console 查看：
+
+1. 開啟 Cloud Run：`https://console.cloud.google.com/run?project=cale-458405`
+2. 點 `cales-breathe-api`
+3. 進入 `Logs` 分頁
+4. 可用關鍵字篩選：`line_webhook`、`Google Calendar`、`ERROR`
+
+---
+
 讀取最近 log：
 
 ```bash
 gcloud run services logs read cales-breathe-api --region asia-east1 --project cale-458405 --limit 100
+```
+
+模擬即時刷新（Cloud Shell）：
+
+```bash
+watch -n 3 'gcloud run services logs read cales-breathe-api --region asia-east1 --project cale-458405 --limit 40'
+```
+
+只看 webhook 相關：
+
+```bash
+gcloud run services logs read cales-breathe-api --region asia-east1 --project cale-458405 --limit 200 | grep line_webhook
 ```
 
 健康檢查：

@@ -624,13 +624,13 @@ def _handle_owner_confirm_sync(
     source_user_id: str,
     owner_line_id: str,
     access_token: str,
-) -> str:
+) -> tuple[str, int | None, str | None, str | None]:
     """Webhook 業主「確認 {id}」指令處理（同步背景版本）。"""
     if not owner_line_id or source_user_id != owner_line_id:
-        return "您無權執行此操作"
+        return "您無權執行此操作", None, None, None
     raw_id = cmd.removeprefix("確認").strip().lstrip("#").strip()
     if not raw_id.isdigit():
-        return "格式錯誤，請使用：確認 {預約編號}"
+        return "格式錯誤，請使用：確認 {預約編號}", None, None, None
     booking_id = int(raw_id)
     customer_line: str | None = None
     push_copy: str | None = None
@@ -643,14 +643,11 @@ def _handle_owner_confirm_sync(
                 customer_line = cust.line_user_id
             push_copy = _booking_confirmed_text(b)
             date_str = b.booking_date.strftime("%Y/%m/%d %H:%M")
-            summary = f"預約 #{b.id}（{date_str}）已確認，通知已送出。"
+            summary = f"預約 #{b.id}（{date_str}）已確認，同步進行中。"
     except HTTPException as exc:
-        return f"操作失敗：{exc.detail}"
+        return f"操作失敗：{exc.detail}", None, None, None
 
-    if customer_line and access_token and push_copy:
-        _bg_line_push_safe(access_token, customer_line, push_copy)
-    _bg_sync_confirm_booking_google_calendar(booking_id)
-    return summary
+    return summary, booking_id, customer_line, push_copy
 
 
 def _handle_owner_cancel_sync(
@@ -658,13 +655,13 @@ def _handle_owner_cancel_sync(
     source_user_id: str,
     owner_line_id: str,
     access_token: str,
-) -> str:
+) -> tuple[str, str | None, str | None, str | None]:
     """Webhook 業主「取消{id}」或「拒絕{id}」指令處理（同步背景版本）。"""
     if not owner_line_id or source_user_id != owner_line_id:
-        return "您無權執行此操作"
+        return "您無權執行此操作", None, None, None
     raw_id = cmd.removeprefix("取消").removeprefix("拒絕").strip().lstrip("#").strip()
     if not raw_id.isdigit():
-        return "格式錯誤，請使用：取消 {預約編號}"
+        return "格式錯誤，請使用：取消 {預約編號}", None, None, None
     booking_id = int(raw_id)
     customer_line: str | None = None
     push_copy: str | None = None
@@ -678,38 +675,34 @@ def _handle_owner_cancel_sync(
                 customer_line = cust.line_user_id
             push_copy = _booking_rejected_text(b)
             date_str = b.booking_date.strftime("%Y/%m/%d %H:%M")
-            summary = f"預約 #{b.id}（{date_str}）已取消，通知已送出。"
+            summary = f"預約 #{b.id}（{date_str}）已取消，同步進行中。"
     except HTTPException as exc:
-        return f"操作失敗：{exc.detail}"
+        return f"操作失敗：{exc.detail}", None, None, None
 
-    if customer_line and access_token and push_copy:
-        _bg_line_push_safe(access_token, customer_line, push_copy)
-    _bg_delete_google_calendar_event(cal_ev)
-    return summary
+    return summary, customer_line, push_copy, cal_ev
 
 
 def _handle_owner_complete_sync(
     cmd: str,
     source_user_id: str,
     owner_line_id: str,
-) -> str:
+) -> tuple[str, int | None]:
     """Webhook 業主「完成{id}」指令處理（同步背景版本）。"""
     if not owner_line_id or source_user_id != owner_line_id:
-        return "您無權執行此操作"
+        return "您無權執行此操作", None
     raw_id = cmd.removeprefix("完成").strip().lstrip("#").strip()
     if not raw_id.isdigit():
-        return "格式錯誤，請使用：完成 {預約編號}"
+        return "格式錯誤，請使用：完成 {預約編號}", None
     booking_id = int(raw_id)
     try:
         with SessionLocal() as db:
             b = _do_complete_booking(booking_id, db)
             date_str = b.booking_date.strftime("%Y/%m/%d %H:%M")
-            summary = f"預約 #{b.id}（{date_str}）已標記完成。"
+            summary = f"預約 #{b.id}（{date_str}）已標記完成，同步進行中。"
     except HTTPException as exc:
-        return f"操作失敗：{exc.detail}"
+        return f"操作失敗：{exc.detail}", None
 
-    _bg_sync_complete_booking_google_calendar(booking_id)
-    return summary
+    return summary, booking_id
 
 
 def _process_line_webhook_event(event: dict, access_token: str) -> None:
@@ -735,6 +728,13 @@ def _process_line_webhook_event(event: dict, access_token: str) -> None:
 
     cmd = (message_text or "").strip()
     owner_line_id = os.getenv("OWNER_LINE_USER_ID", "").strip()
+    post_confirm_booking_id: int | None = None
+    post_confirm_customer_line: str | None = None
+    post_confirm_push_copy: str | None = None
+    post_cancel_cal_ev: str | None = None
+    post_cancel_customer_line: str | None = None
+    post_cancel_push_copy: str | None = None
+    post_complete_booking_id: int | None = None
 
     if cmd.lower() == "help":
         reply_text = _help_text()
@@ -743,11 +743,21 @@ def _process_line_webhook_event(event: dict, access_token: str) -> None:
             services = db_svc.query(Service).all()
             reply_text = _format_services_text(services)
     elif cmd.startswith("確認"):
-        reply_text = _handle_owner_confirm_sync(cmd, source_uid, owner_line_id, access_token)
+        (
+            reply_text,
+            post_confirm_booking_id,
+            post_confirm_customer_line,
+            post_confirm_push_copy,
+        ) = _handle_owner_confirm_sync(cmd, source_uid, owner_line_id, access_token)
     elif cmd.startswith("取消") or cmd.startswith("拒絕"):
-        reply_text = _handle_owner_cancel_sync(cmd, source_uid, owner_line_id, access_token)
+        (
+            reply_text,
+            post_cancel_customer_line,
+            post_cancel_push_copy,
+            post_cancel_cal_ev,
+        ) = _handle_owner_cancel_sync(cmd, source_uid, owner_line_id, access_token)
     elif cmd.startswith("完成"):
-        reply_text = _handle_owner_complete_sync(cmd, source_uid, owner_line_id)
+        reply_text, post_complete_booking_id = _handle_owner_complete_sync(cmd, source_uid, owner_line_id)
     else:
         reply_text = f"收到：{cmd}\n\n（輸入 help 查看可用指令）"
 
@@ -759,6 +769,20 @@ def _process_line_webhook_event(event: dict, access_token: str) -> None:
         )
     except Exception as exc:
         print(f"[line_webhook] reply 失敗 event_id={event_id}: {exc}")
+
+    # 回覆業主後再做較慢的同步，提升聊天體感。
+    if post_confirm_customer_line and access_token and post_confirm_push_copy:
+        _bg_line_push_safe(access_token, post_confirm_customer_line, post_confirm_push_copy)
+    if post_confirm_booking_id is not None:
+        _bg_sync_confirm_booking_google_calendar(post_confirm_booking_id)
+
+    if post_cancel_customer_line and access_token and post_cancel_push_copy:
+        _bg_line_push_safe(access_token, post_cancel_customer_line, post_cancel_push_copy)
+    if post_cancel_cal_ev:
+        _bg_delete_google_calendar_event(post_cancel_cal_ev)
+
+    if post_complete_booking_id is not None:
+        _bg_sync_complete_booking_google_calendar(post_complete_booking_id)
 
 
 @app.get("/health")
