@@ -18,7 +18,19 @@ from uuid import uuid4
 
 import httpx
 import jwt
-from fastapi import FastAPI, Depends, HTTPException, Query, Request, Header, Response, UploadFile, File, Form
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -385,6 +397,100 @@ def _push_text_to_line_sync(access_token: str, user_id: str, text: str) -> None:
         resp.raise_for_status()
 
 
+def _bg_line_push_safe(access_token: str, user_id: str, text: str) -> None:
+    """背景 LINE Push：失敗只 log，不拋出。"""
+    try:
+        _push_text_to_line_sync(access_token, user_id, text)
+    except Exception as exc:
+        print(f"[bg] LINE Push 失敗：{exc}")
+
+
+def _bg_after_booking_created_calendar_and_line(booking_id: int, customer_user_id: int) -> None:
+    """建立預約後背景：Google Calendar（待確認）+ 寫回 event_id + LINE 通知業主。"""
+    with SessionLocal() as db:
+        booking = (
+            db.query(Booking)
+            .options(joinedload(Booking.services))
+            .filter(Booking.id == booking_id)
+            .first()
+        )
+        customer = db.query(User).filter(User.id == customer_user_id).first()
+        if not booking or not customer:
+            return
+        try:
+            event_id = gcal.create_event(booking, customer, status="pending")
+            if event_id:
+                booking.google_calendar_event_id = event_id
+                db.commit()
+        except Exception as exc:
+            print(f"[bg create_booking] Google Calendar 建立失敗：{exc}")
+        owner_line_id = os.getenv("OWNER_LINE_USER_ID", "").strip()
+        access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+        if owner_line_id and access_token:
+            try:
+                _push_text_to_line_sync(
+                    access_token,
+                    owner_line_id,
+                    _new_booking_owner_text(booking, customer),
+                )
+            except Exception as exc:
+                print(f"[bg create_booking] LINE 業主通知失敗：{exc}")
+
+
+def _bg_sync_confirm_booking_google_calendar(booking_id: int) -> None:
+    """確認預約後背景：更新或建立 Google Calendar 事件（已確認）。"""
+    with SessionLocal() as db:
+        b = (
+            db.query(Booking)
+            .options(joinedload(Booking.services))
+            .filter(Booking.id == booking_id)
+            .first()
+        )
+        if not b or b.status != "confirmed":
+            return
+        customer = db.query(User).filter(User.id == b.user_id).first()
+        if not customer:
+            return
+        try:
+            if b.google_calendar_event_id:
+                gcal.update_event_status(b.google_calendar_event_id, b, customer, "confirmed")
+            else:
+                event_id = gcal.create_event(b, customer, status="confirmed")
+                if event_id:
+                    b.google_calendar_event_id = event_id
+                    db.commit()
+        except Exception as exc:
+            print(f"[bg confirm_booking] Google Calendar 更新失敗：{exc}")
+
+
+def _bg_sync_complete_booking_google_calendar(booking_id: int) -> None:
+    """標記完成後背景：Google Calendar 事件改為已完成。"""
+    with SessionLocal() as db:
+        b = (
+            db.query(Booking)
+            .options(joinedload(Booking.services))
+            .filter(Booking.id == booking_id)
+            .first()
+        )
+        if not b or b.status != "completed":
+            return
+        customer = db.query(User).filter(User.id == b.user_id).first()
+        if not customer:
+            return
+        try:
+            gcal.update_event_status(b.google_calendar_event_id, b, customer, "completed")
+        except Exception as exc:
+            print(f"[bg complete_booking] Google Calendar 更新失敗：{exc}")
+
+
+def _bg_delete_google_calendar_event(cal_event_id: str | None) -> None:
+    """背景刪除行事曆事件（取消預約）。"""
+    try:
+        gcal.delete_event(cal_event_id or "")
+    except Exception as exc:
+        print(f"[bg cancel_booking] Google Calendar 刪除失敗：{exc}")
+
+
 def _new_booking_owner_text(b: "Booking", customer: "User") -> str:
     """新預約待審核通知（傳給業主）。"""
     date_str = b.booking_date.strftime("%Y/%m/%d %H:%M")
@@ -510,6 +616,7 @@ def health(db: Session = Depends(get_db)):
 @app.post("/line/webhook")
 async def line_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_line_signature: str | None = Header(default=None),
 ):
     """LINE Webhook：不可在單一 ORM Session 上跨 await 佔用連線（會塞滿小連線池）。"""
@@ -577,6 +684,7 @@ async def line_webhook(
                     source_user_id=source_user_id,
                     owner_line_id=owner_line_id,
                     access_token=access_token,
+                    background_tasks=background_tasks,
                 )
             elif cmd.startswith("取消") or cmd.startswith("拒絕"):
                 reply_text = await _handle_owner_cancel(
@@ -584,6 +692,7 @@ async def line_webhook(
                     source_user_id=source_user_id,
                     owner_line_id=owner_line_id,
                     access_token=access_token,
+                    background_tasks=background_tasks,
                 )
             elif cmd.startswith("完成"):
                 reply_text = await _handle_owner_complete(
@@ -591,6 +700,7 @@ async def line_webhook(
                     source_user_id=source_user_id,
                     owner_line_id=owner_line_id,
                     access_token=access_token,
+                    background_tasks=background_tasks,
                 )
             else:
                 reply_text = f"收到：{cmd}\n\n（輸入 help 查看可用指令）"
@@ -949,7 +1059,12 @@ def _legacy_order_from_booking(booking: Booking, services: list[Service]) -> dic
 
 
 @app.post("/orders")
-def legacy_create_order(request: Request, payload: dict, db: Session = Depends(get_db)):
+def legacy_create_order(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
     """
     舊前端建立預約入口。
     - 驗證登入：JWT cookie
@@ -989,7 +1104,11 @@ def legacy_create_order(request: Request, payload: dict, db: Session = Depends(g
         notes=notes,
     )
     try:
-        created = create_booking(booking_create, db)  # reuse v2 logic
+        created = create_booking(
+            booking_create,
+            background_tasks=background_tasks,
+            db=db,
+        )
     except IntegrityError as exc:
         db.rollback()
         if "booking_services.booking_id, booking_services.service_id" in str(exc.orig):
@@ -1022,7 +1141,12 @@ def legacy_list_orders(client_id: int = Query(...), request: Request = None, db:
 
 
 @app.put("/orders/cancel/{booking_id}")
-def legacy_cancel_order(booking_id: int, request: Request, db: Session = Depends(get_db)):
+def legacy_cancel_order(
+    booking_id: int,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     user = _get_current_user_from_cookie(request, db)
     b = (
         db.query(Booking)
@@ -1045,15 +1169,9 @@ def legacy_cancel_order(booking_id: int, request: Request, db: Session = Depends
     db.commit()
     db.refresh(b)
 
-    # 同步 Google Calendar：刪除事件
-    try:
-        gcal.delete_event(cal_event_id)
-    except Exception as exc:
-        print(f"[legacy_cancel_order] Google Calendar 刪除失敗（不影響取消）：{exc}")
-
-    # 客人取消才通知業主（業主自己取消不通知）
+    background_tasks.add_task(_bg_delete_google_calendar_event, cal_event_id)
     if user.role != "owner":
-        _notify_owner_customer_cancelled(b, user)
+        background_tasks.add_task(_bg_notify_owner_customer_cancelled, booking_id, user.id)
 
     return {"message": "預約已取消"}
 
@@ -1075,7 +1193,11 @@ def _assert_booking_on_30_min_grid(booking_date: datetime) -> None:
 
 
 @app.post("/bookings", response_model=BookingRead)
-def create_booking(data: BookingCreate, db: Session = Depends(get_db)):
+def create_booking(
+    data: BookingCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """建立預約（支援多服務），檢查 X選1 與時段衝突"""
     target_user = db.query(User).filter(User.id == data.user_id).first()
     if not target_user:
@@ -1123,27 +1245,11 @@ def create_booking(data: BookingCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(booking)
 
-    # 同步 Google Calendar：建立黃色「待確認」事件
-    try:
-        event_id = gcal.create_event(booking, target_user, status="pending")
-        if event_id:
-            booking.google_calendar_event_id = event_id
-            db.commit()
-    except Exception as exc:
-        print(f"[create_booking] Google Calendar 建立失敗（不影響預約建立）：{exc}")
-
-    # 推播新預約通知給業主
-    owner_line_id = os.getenv("OWNER_LINE_USER_ID", "").strip()
-    access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
-    if owner_line_id and access_token:
-        try:
-            _push_text_to_line_sync(
-                access_token,
-                owner_line_id,
-                _new_booking_owner_text(booking, target_user),
-            )
-        except Exception as exc:
-            print(f"[create_booking] LINE 業主通知失敗（不影響預約建立）：{exc}")
+    background_tasks.add_task(
+        _bg_after_booking_created_calendar_and_line,
+        booking.id,
+        data.user_id,
+    )
 
     return _booking_to_read(booking)
 
@@ -1166,30 +1272,16 @@ def _do_confirm_booking(booking_id: int, db: Session) -> Booking:
     db.commit()
     db.refresh(b)
 
-    # 同步 Google Calendar：事件改藍色「已確認」
-    try:
-        customer = db.query(User).filter(User.id == b.user_id).first()
-        if customer:
-            if b.google_calendar_event_id:
-                gcal.update_event_status(b.google_calendar_event_id, b, customer, "confirmed")
-            else:
-                event_id = gcal.create_event(b, customer, status="confirmed")
-                if event_id:
-                    b.google_calendar_event_id = event_id
-                    db.commit()
-    except Exception as exc:
-        print(f"[confirm_booking] Google Calendar 更新失敗（不影響確認）：{exc}")
-
     return b
 
 
-def _do_reject_booking(booking_id: int, db: Session) -> Booking:
+def _do_reject_booking(booking_id: int, db: Session) -> tuple[Booking, str | None]:
     """向下相容舊邏輯，實際委派給 _do_cancel_booking。"""
     return _do_cancel_booking(booking_id, db)
 
 
-def _do_cancel_booking(booking_id: int, db: Session) -> Booking:
-    """共用取消邏輯：pending 或 confirmed → cancelled，回傳更新後的 Booking。"""
+def _do_cancel_booking(booking_id: int, db: Session) -> tuple[Booking, str | None]:
+    """共用取消邏輯：pending 或 confirmed → cancelled；回傳 (Booking, 刪除用 google_calendar_event_id)。"""
     b = (
         db.query(Booking)
         .options(joinedload(Booking.services))
@@ -1210,12 +1302,7 @@ def _do_cancel_booking(booking_id: int, db: Session) -> Booking:
     db.commit()
     db.refresh(b)
 
-    try:
-        gcal.delete_event(cal_event_id)
-    except Exception as exc:
-        print(f"[cancel_booking] Google Calendar 刪除失敗（不影響取消）：{exc}")
-
-    return b
+    return b, cal_event_id
 
 
 def _do_complete_booking(booking_id: int, db: Session) -> Booking:
@@ -1236,20 +1323,13 @@ def _do_complete_booking(booking_id: int, db: Session) -> Booking:
     db.commit()
     db.refresh(b)
 
-    # 同步 Google Calendar：事件改綠色「已完成」
-    try:
-        customer = db.query(User).filter(User.id == b.user_id).first()
-        if customer:
-            gcal.update_event_status(b.google_calendar_event_id, b, customer, "completed")
-    except Exception as exc:
-        print(f"[complete_booking] Google Calendar 更新失敗（不影響完成）：{exc}")
-
     return b
 
 
 @app.post("/bookings/{booking_id}/confirm", response_model=BookingRead)
 def confirm_booking(
     booking_id: int,
+    background_tasks: BackgroundTasks,
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -1260,18 +1340,18 @@ def confirm_booking(
 
     b = _do_confirm_booking(booking_id, db)
 
+    background_tasks.add_task(_bg_sync_confirm_booking_google_calendar, b.id)
+
     customer = db.query(User).filter(User.id == b.user_id).first()
     if customer and customer.line_user_id:
         access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
         if access_token:
-            try:
-                _push_text_to_line_sync(
-                    access_token,
-                    customer.line_user_id,
-                    _booking_confirmed_text(b),
-                )
-            except Exception as exc:
-                print(f"[confirm_booking] LINE 客人通知失敗（不影響確認）：{exc}")
+            background_tasks.add_task(
+                _bg_line_push_safe,
+                access_token,
+                customer.line_user_id,
+                _booking_confirmed_text(b),
+            )
 
     return _booking_to_read(b)
 
@@ -1281,6 +1361,7 @@ async def _handle_owner_confirm(
     source_user_id: str,
     owner_line_id: str,
     access_token: str,
+    background_tasks: BackgroundTasks,
 ) -> str:
     """Webhook 業主「確認 {id}」指令處理，回傳要 reply 的文字。"""
     if not owner_line_id or source_user_id != owner_line_id:
@@ -1305,11 +1386,10 @@ async def _handle_owner_confirm(
     except HTTPException as exc:
         return f"操作失敗：{exc.detail}"
 
+    background_tasks.add_task(_bg_sync_confirm_booking_google_calendar, booking_id)
+
     if customer_line and access_token and push_copy:
-        try:
-            await _push_text_to_line(access_token, customer_line, push_copy)
-        except Exception as exc:
-            print(f"[webhook confirm] 客人通知失敗：{exc}")
+        background_tasks.add_task(_bg_line_push_safe, access_token, customer_line, push_copy)
 
     return summary
 
@@ -1319,9 +1399,12 @@ async def _handle_owner_reject(
     source_user_id: str,
     owner_line_id: str,
     access_token: str,
+    background_tasks: BackgroundTasks,
 ) -> str:
     """向下相容舊「拒絕」指令，邏輯同取消。"""
-    return await _handle_owner_cancel(cmd, source_user_id, owner_line_id, access_token)
+    return await _handle_owner_cancel(
+        cmd, source_user_id, owner_line_id, access_token, background_tasks
+    )
 
 
 async def _handle_owner_cancel(
@@ -1329,6 +1412,7 @@ async def _handle_owner_cancel(
     source_user_id: str,
     owner_line_id: str,
     access_token: str,
+    background_tasks: BackgroundTasks,
 ) -> str:
     """Webhook 業主「取消{id}」或「拒絕{id}」指令處理，回傳要 reply 的文字。"""
     if not owner_line_id or source_user_id != owner_line_id:
@@ -1341,9 +1425,10 @@ async def _handle_owner_cancel(
     customer_line: str | None = None
     push_copy: str | None = None
     summary = ""
+    cal_ev: str | None = None
     try:
         with SessionLocal() as db:
-            b = _do_cancel_booking(booking_id, db)
+            b, cal_ev = _do_cancel_booking(booking_id, db)
             cust = db.query(User).filter(User.id == b.user_id).first()
             if cust and cust.line_user_id:
                 customer_line = cust.line_user_id
@@ -1353,11 +1438,10 @@ async def _handle_owner_cancel(
     except HTTPException as exc:
         return f"操作失敗：{exc.detail}"
 
+    background_tasks.add_task(_bg_delete_google_calendar_event, cal_ev)
+
     if customer_line and access_token and push_copy:
-        try:
-            await _push_text_to_line(access_token, customer_line, push_copy)
-        except Exception as exc:
-            print(f"[webhook cancel] 客人通知失敗：{exc}")
+        background_tasks.add_task(_bg_line_push_safe, access_token, customer_line, push_copy)
 
     return summary
 
@@ -1367,6 +1451,7 @@ async def _handle_owner_complete(
     source_user_id: str,
     owner_line_id: str,
     access_token: str,
+    background_tasks: BackgroundTasks,
 ) -> str:
     """Webhook 業主「完成{id}」指令處理，回傳要 reply 的文字。"""
     if not owner_line_id or source_user_id != owner_line_id:
@@ -1380,9 +1465,12 @@ async def _handle_owner_complete(
         with SessionLocal() as db:
             b = _do_complete_booking(booking_id, db)
             date_str = b.booking_date.strftime("%Y/%m/%d %H:%M")
-            return f"預約 #{b.id}（{date_str}）已標記完成。"
+            summary = f"預約 #{b.id}（{date_str}）已標記完成。"
     except HTTPException as exc:
         return f"操作失敗：{exc.detail}"
+
+    background_tasks.add_task(_bg_sync_complete_booking_google_calendar, booking_id)
+    return summary
 
 
 def _notify_owner_customer_cancelled(b: Booking, customer: User) -> None:
@@ -1395,6 +1483,21 @@ def _notify_owner_customer_cancelled(b: Booking, customer: User) -> None:
         _push_text_to_line_sync(access_token, owner_line_id, _customer_cancelled_owner_text(b, customer))
     except Exception as exc:
         print(f"[cancel_booking] LINE 業主通知失敗（不影響取消）：{exc}")
+
+
+def _bg_notify_owner_customer_cancelled(booking_id: int, cancelled_by_user_id: int) -> None:
+    """背景：客人取消後以新 Session 載入資料並通知業主 LINE。"""
+    with SessionLocal() as db:
+        b = (
+            db.query(Booking)
+            .options(joinedload(Booking.services))
+            .filter(Booking.id == booking_id)
+            .first()
+        )
+        actor = db.query(User).filter(User.id == cancelled_by_user_id).first()
+        if not b or not actor:
+            return
+        _notify_owner_customer_cancelled(b, actor)
 
 
 def _assert_can_cancel_booking(actor: User, booking: Booking) -> None:
@@ -1463,6 +1566,7 @@ def get_booking(booking_id: int, db: Session = Depends(get_db)):
 def cancel_booking(
     booking_id: int,
     data: BookingCancel,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """取消預約（軟刪除：status 改為 cancelled，時段釋出供他人預約）；僅預約本人或 owner 可操作"""
@@ -1490,14 +1594,9 @@ def cancel_booking(
     db.commit()
     db.refresh(b)
 
-    # 同步 Google Calendar：刪除事件
-    try:
-        gcal.delete_event(cal_event_id)
-    except Exception as exc:
-        print(f"[cancel_booking] Google Calendar 刪除失敗（不影響取消）：{exc}")
+    background_tasks.add_task(_bg_delete_google_calendar_event, cal_event_id)
 
-    # 客人取消才通知業主（業主自己取消不通知）
     if actor.role != "owner":
-        _notify_owner_customer_cancelled(b, actor)
+        background_tasks.add_task(_bg_notify_owner_customer_cancelled, booking_id, actor.id)
 
     return _booking_to_read(b)

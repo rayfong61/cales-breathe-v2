@@ -120,12 +120,12 @@ def test_webhook_owner_confirm_command_changes_status(client, monkeypatch):
     async def _noop_reply(**kw):
         pass
 
-    async def _fake_push(access_token, user_id, text):
+    def _fake_push_sync(access_token, user_id, text):
         push_calls.append((user_id, text))
 
     monkeypatch.setenv("LINE_CHANNEL_SECRET", "test-secret")
     monkeypatch.setattr(main_module, "_reply_text_to_line", _noop_reply)
-    monkeypatch.setattr(main_module, "_push_text_to_line", _fake_push)
+    monkeypatch.setattr(main_module, "_push_text_to_line_sync", _fake_push_sync)
 
     event = _make_text_event(f"確認 {booking_id}", source_user_id=OWNER_LINE_ID)
     payload = {"events": [event]}
@@ -156,12 +156,12 @@ def test_webhook_owner_reject_command_cancels_booking(client, monkeypatch):
     async def _noop_reply(**kw):
         pass
 
-    async def _fake_push(access_token, user_id, text):
+    def _fake_push_sync(access_token, user_id, text):
         push_calls.append((user_id, text))
 
     monkeypatch.setenv("LINE_CHANNEL_SECRET", "test-secret")
     monkeypatch.setattr(main_module, "_reply_text_to_line", _noop_reply)
-    monkeypatch.setattr(main_module, "_push_text_to_line", _fake_push)
+    monkeypatch.setattr(main_module, "_push_text_to_line_sync", _fake_push_sync)
 
     event = _make_text_event(f"拒絕 {booking_id}", source_user_id=OWNER_LINE_ID)
     payload = {"events": [event]}
