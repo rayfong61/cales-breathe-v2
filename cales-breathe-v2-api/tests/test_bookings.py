@@ -124,6 +124,36 @@ def test_create_booking_requires_30_minute_grid(client, monkeypatch):
     assert response.json()["detail"] == "預約時間需為 30 分鐘格線（HH:00 或 HH:30）"
 
 
+def test_create_booking_rejects_past_time(client, monkeypatch):
+    monkeypatch.setattr(main_module, "_push_text_to_line_sync", lambda *a, **kw: None)
+    user_id = _create_user(client, "past-time-user")
+    arm_service_id = _get_service_ids_by_category(client, "手臂")[0]
+
+    now = datetime.now().replace(second=0, microsecond=0)
+    minute = 30 if now.minute >= 30 else 0
+    past_when = now.replace(minute=minute) - timedelta(hours=1)
+
+    response = _create_booking(client, user_id, [arm_service_id], past_when)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "不可預約過去時間"
+
+
+def test_unavailable_dates_marks_fully_booked_day(client, monkeypatch):
+    monkeypatch.setattr(main_module, "_push_text_to_line_sync", lambda *a, **kw: None)
+    user_id = _create_user(client, "full-day-user")
+    service_id = _get_service_ids_by_category(client, "手臂")[0]
+
+    target_day = datetime(2030, 5, 1, 0, 0, 0)
+    for hour in range(9, 18):
+        when = target_day.replace(hour=hour)
+        resp = _create_booking(client, user_id, [service_id], when)
+        assert resp.status_code == 200
+
+    dates_resp = client.get("/unavailable-dates")
+    assert dates_resp.status_code == 200
+    assert "2030-05-01" in dates_resp.json()
+
+
 def test_owner_can_create_booking_for_customer(client, monkeypatch):
     monkeypatch.setattr(main_module, "_push_text_to_line_sync", lambda *a, **kw: None)
     owner_id = _create_user(client, "owner-create", role="owner")

@@ -105,7 +105,21 @@ function BookingDateTimeContent() {
 
 const getAvailableTimes = () => {
   if (!selectedDate) return [];
-  return allTimeSlots.filter((time) => !isTimeSlotUnavailable(time, unavailableTimeRanges));
+  const todayStr = formatDate(new Date());
+  const selectedDateStr = formatDate(selectedDate);
+  const now = new Date();
+
+  return allTimeSlots.filter((time) => {
+    if (isTimeSlotUnavailable(time, unavailableTimeRanges)) {
+      return false;
+    }
+    // 今日不可選過去時段（例如現在 16:16，16:00 不可再選）。
+    if (selectedDateStr === todayStr) {
+      const slotStart = new Date(`${selectedDateStr}T${time}:00`);
+      if (slotStart <= now) return false;
+    }
+    return true;
+  });
 };
 
 

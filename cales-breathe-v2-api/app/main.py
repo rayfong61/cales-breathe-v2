@@ -1114,14 +1114,49 @@ def legacy_unavailable_times(date: str = Query(...), db: Session = Depends(get_d
 
 @app.get("/unavailable-dates")
 def legacy_unavailable_dates(db: Session = Depends(get_db)):
-    # 舊前端規則：同日總工時 >= 480 分鐘視為已滿
-    confirmed = db.query(Booking).filter(Booking.status.in_(["pending", "confirmed"])).all()
-    daily = {}
-    for b in confirmed:
-        day = b.booking_date.date().isoformat()
-        daily[day] = daily.get(day, 0) + b.total_duration_minutes
-    full = [d for d, minutes in daily.items() if minutes >= 480]
-    return full
+    # 以「可預約時段是否全滿」判斷客滿日期，並忽略過去日期。
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    active = (
+        db.query(Booking)
+        .filter(
+            Booking.status.in_(["pending", "confirmed"]),
+            Booking.booking_date >= today_start,
+        )
+        .all()
+    )
+
+    by_day: dict[str, list[Booking]] = {}
+    for b in active:
+        by_day.setdefault(b.booking_date.date().isoformat(), []).append(b)
+
+    full_days: list[str] = []
+    for day_str, bookings in by_day.items():
+        day = datetime.fromisoformat(f"{day_str}T00:00:00")
+        slot_starts = [day.replace(hour=h, minute=0, second=0, microsecond=0) for h in range(9, 18)]
+
+        # 今天只允許挑選「現在之後」的時段。
+        if day.date() == now.date():
+            slot_starts = [slot for slot in slot_starts if slot > now]
+            if not slot_starts:
+                full_days.append(day_str)
+                continue
+
+        has_available = False
+        for slot_start in slot_starts:
+            slot_end = slot_start + timedelta(hours=1)
+            overlapped = any(
+                slot_start < (b.booking_date + timedelta(minutes=b.total_duration_minutes))
+                and b.booking_date < slot_end
+                for b in bookings
+            )
+            if not overlapped:
+                has_available = True
+                break
+        if not has_available:
+            full_days.append(day_str)
+
+    return full_days
 
 
 def _legacy_order_from_booking(booking: Booking, services: list[Service]) -> dict:
@@ -1283,6 +1318,12 @@ def _assert_booking_on_30_min_grid(booking_date: datetime) -> None:
         raise HTTPException(400, "預約時間需為 30 分鐘格線（HH:00 或 HH:30）")
 
 
+def _assert_booking_not_in_past(booking_date: datetime) -> None:
+    """不可建立過去時間的預約。"""
+    if booking_date <= datetime.now():
+        raise HTTPException(400, "不可預約過去時間")
+
+
 @app.post("/bookings", response_model=BookingRead)
 def create_booking(
     data: BookingCreate,
@@ -1306,6 +1347,7 @@ def create_booking(
         raise HTTPException(404, "部分服務不存在")
     _validate_category_max_one(services)
     _assert_booking_on_30_min_grid(data.booking_date)
+    _assert_booking_not_in_past(data.booking_date)
     total_duration = sum(s.duration_minutes for s in services)
     total_price = sum(s.price for s in services)
 
