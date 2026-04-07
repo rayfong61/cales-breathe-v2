@@ -434,13 +434,6 @@ def _bg_after_booking_created_calendar_and_line(booking_id: int, customer_user_i
         customer = db.query(User).filter(User.id == customer_user_id).first()
         if not booking or not customer:
             return
-        try:
-            event_id = gcal.create_event(booking, customer, status="pending")
-            if event_id:
-                booking.google_calendar_event_id = event_id
-                db.commit()
-        except Exception as exc:
-            print(f"[bg create_booking] Google Calendar 建立失敗：{exc}")
         owner_line_id = os.getenv("OWNER_LINE_USER_ID", "").strip()
         access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
         if owner_line_id and access_token:
@@ -452,6 +445,13 @@ def _bg_after_booking_created_calendar_and_line(booking_id: int, customer_user_i
                 )
             except Exception as exc:
                 print(f"[bg create_booking] LINE 業主通知失敗：{exc}")
+        try:
+            event_id = gcal.create_event(booking, customer, status="pending")
+            if event_id:
+                booking.google_calendar_event_id = event_id
+                db.commit()
+        except Exception as exc:
+            print(f"[bg create_booking] Google Calendar 建立失敗：{exc}")
 
 
 def _bg_sync_confirm_booking_google_calendar(booking_id: int) -> None:
@@ -647,9 +647,9 @@ def _handle_owner_confirm_sync(
     except HTTPException as exc:
         return f"操作失敗：{exc.detail}"
 
-    _bg_sync_confirm_booking_google_calendar(booking_id)
     if customer_line and access_token and push_copy:
         _bg_line_push_safe(access_token, customer_line, push_copy)
+    _bg_sync_confirm_booking_google_calendar(booking_id)
     return summary
 
 
@@ -682,9 +682,9 @@ def _handle_owner_cancel_sync(
     except HTTPException as exc:
         return f"操作失敗：{exc.detail}"
 
-    _bg_delete_google_calendar_event(cal_ev)
     if customer_line and access_token and push_copy:
         _bg_line_push_safe(access_token, customer_line, push_copy)
+    _bg_delete_google_calendar_event(cal_ev)
     return summary
 
 
@@ -1473,8 +1473,6 @@ def confirm_booking(
 
     b = _do_confirm_booking(booking_id, db)
 
-    background_tasks.add_task(_bg_sync_confirm_booking_google_calendar, b.id)
-
     customer = db.query(User).filter(User.id == b.user_id).first()
     if customer and customer.line_user_id:
         access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
@@ -1485,6 +1483,7 @@ def confirm_booking(
                 customer.line_user_id,
                 _booking_confirmed_text(b),
             )
+    background_tasks.add_task(_bg_sync_confirm_booking_google_calendar, b.id)
 
     return _booking_to_read(b)
 
@@ -1519,10 +1518,9 @@ async def _handle_owner_confirm(
     except HTTPException as exc:
         return f"操作失敗：{exc.detail}"
 
-    background_tasks.add_task(_bg_sync_confirm_booking_google_calendar, booking_id)
-
     if customer_line and access_token and push_copy:
         background_tasks.add_task(_bg_line_push_safe, access_token, customer_line, push_copy)
+    background_tasks.add_task(_bg_sync_confirm_booking_google_calendar, booking_id)
 
     return summary
 
@@ -1571,10 +1569,9 @@ async def _handle_owner_cancel(
     except HTTPException as exc:
         return f"操作失敗：{exc.detail}"
 
-    background_tasks.add_task(_bg_delete_google_calendar_event, cal_ev)
-
     if customer_line and access_token and push_copy:
         background_tasks.add_task(_bg_line_push_safe, access_token, customer_line, push_copy)
+    background_tasks.add_task(_bg_delete_google_calendar_event, cal_ev)
 
     return summary
 
