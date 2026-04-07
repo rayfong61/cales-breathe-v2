@@ -705,7 +705,9 @@ async def line_webhook(
             else:
                 reply_text = f"收到：{cmd}\n\n（輸入 help 查看可用指令）"
 
-            await _reply_text_to_line(
+            # Webhook 先快速回 200，LINE reply API 改為背景執行，避免請求逾時重送。
+            background_tasks.add_task(
+                _reply_text_to_line,
                 access_token=access_token,
                 reply_token=reply_token,
                 text=reply_text,
