@@ -29,13 +29,11 @@ def _make_text_event(text: str, source_user_id: str = "U_someone") -> dict:
 def _post_webhook(client, monkeypatch, events: list, secret: str = "test-secret") -> dict:
     monkeypatch.setenv("LINE_CHANNEL_SECRET", secret)
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "fake-token")
-    monkeypatch.setattr(main_module, "_reply_text_to_line",
-                        lambda **kw: __import__("asyncio").sleep(0))
-
     async def _noop_reply(**kw):
         pass
 
     monkeypatch.setattr(main_module, "_reply_text_to_line", _noop_reply)
+    monkeypatch.setattr(main_module, "_reply_text_to_line_sync", lambda *a, **kw: None)
 
     payload = {"events": events}
     raw, signature = _sign_body(secret, payload)
@@ -125,6 +123,7 @@ def test_webhook_owner_confirm_command_changes_status(client, monkeypatch):
 
     monkeypatch.setenv("LINE_CHANNEL_SECRET", "test-secret")
     monkeypatch.setattr(main_module, "_reply_text_to_line", _noop_reply)
+    monkeypatch.setattr(main_module, "_reply_text_to_line_sync", lambda *a, **kw: None)
     monkeypatch.setattr(main_module, "_push_text_to_line_sync", _fake_push_sync)
 
     event = _make_text_event(f"確認 {booking_id}", source_user_id=OWNER_LINE_ID)
@@ -161,6 +160,7 @@ def test_webhook_owner_reject_command_cancels_booking(client, monkeypatch):
 
     monkeypatch.setenv("LINE_CHANNEL_SECRET", "test-secret")
     monkeypatch.setattr(main_module, "_reply_text_to_line", _noop_reply)
+    monkeypatch.setattr(main_module, "_reply_text_to_line_sync", lambda *a, **kw: None)
     monkeypatch.setattr(main_module, "_push_text_to_line_sync", _fake_push_sync)
 
     event = _make_text_event(f"拒絕 {booking_id}", source_user_id=OWNER_LINE_ID)
@@ -191,6 +191,7 @@ def test_webhook_non_owner_confirm_rejected(client, monkeypatch):
     monkeypatch.setenv("LINE_CHANNEL_SECRET", "test-secret")
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "fake-token")
     monkeypatch.setattr(main_module, "_reply_text_to_line", _noop_reply)
+    monkeypatch.setattr(main_module, "_reply_text_to_line_sync", lambda *a, **kw: None)
 
     event = _make_text_event(f"確認 {booking_id}", source_user_id="U_random_user")
     payload = {"events": [event]}
@@ -211,10 +212,10 @@ def test_webhook_confirm_invalid_id_format(client, monkeypatch):
 
     replied: list = []
 
-    async def _capture_reply(access_token, reply_token, text):
+    def _capture_reply(access_token, reply_token, text):
         replied.append(text)
 
-    monkeypatch.setattr(main_module, "_reply_text_to_line", _capture_reply)
+    monkeypatch.setattr(main_module, "_reply_text_to_line_sync", _capture_reply)
     monkeypatch.setattr(main_module, "_push_text_to_line_sync", lambda *a, **kw: None)
 
     event = _make_text_event("確認 abc", source_user_id=OWNER_LINE_ID)

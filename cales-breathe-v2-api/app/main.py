@@ -385,6 +385,23 @@ async def _push_text_to_line(access_token: str, user_id: str, text: str) -> None
         resp.raise_for_status()
 
 
+def _reply_text_to_line_sync(
+    access_token: str,
+    reply_token: str,
+    text: str,
+) -> None:
+    """呼叫 LINE Reply API 回覆文字訊息（同步，供背景任務使用）。"""
+    url = "https://api.line.me/v2/bot/message/reply"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    payload = {
+        "replyToken": reply_token,
+        "messages": [{"type": "text", "text": text}],
+    }
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+
+
 def _push_text_to_line_sync(access_token: str, user_id: str, text: str) -> None:
     """呼叫 LINE Push API 主動推播文字訊息（同步，用於 sync route handler）。"""
     url = "https://api.line.me/v2/bot/message/push"
@@ -602,6 +619,148 @@ def _format_services_text(services: list[Service]) -> str:
     return text[:4900]
 
 
+def _handle_owner_confirm_sync(
+    cmd: str,
+    source_user_id: str,
+    owner_line_id: str,
+    access_token: str,
+) -> str:
+    """Webhook 業主「確認 {id}」指令處理（同步背景版本）。"""
+    if not owner_line_id or source_user_id != owner_line_id:
+        return "您無權執行此操作"
+    raw_id = cmd.removeprefix("確認").strip().lstrip("#").strip()
+    if not raw_id.isdigit():
+        return "格式錯誤，請使用：確認 {預約編號}"
+    booking_id = int(raw_id)
+    customer_line: str | None = None
+    push_copy: str | None = None
+    summary = ""
+    try:
+        with SessionLocal() as db:
+            b = _do_confirm_booking(booking_id, db)
+            cust = db.query(User).filter(User.id == b.user_id).first()
+            if cust and cust.line_user_id:
+                customer_line = cust.line_user_id
+            push_copy = _booking_confirmed_text(b)
+            date_str = b.booking_date.strftime("%Y/%m/%d %H:%M")
+            summary = f"預約 #{b.id}（{date_str}）已確認，通知已送出。"
+    except HTTPException as exc:
+        return f"操作失敗：{exc.detail}"
+
+    _bg_sync_confirm_booking_google_calendar(booking_id)
+    if customer_line and access_token and push_copy:
+        _bg_line_push_safe(access_token, customer_line, push_copy)
+    return summary
+
+
+def _handle_owner_cancel_sync(
+    cmd: str,
+    source_user_id: str,
+    owner_line_id: str,
+    access_token: str,
+) -> str:
+    """Webhook 業主「取消{id}」或「拒絕{id}」指令處理（同步背景版本）。"""
+    if not owner_line_id or source_user_id != owner_line_id:
+        return "您無權執行此操作"
+    raw_id = cmd.removeprefix("取消").removeprefix("拒絕").strip().lstrip("#").strip()
+    if not raw_id.isdigit():
+        return "格式錯誤，請使用：取消 {預約編號}"
+    booking_id = int(raw_id)
+    customer_line: str | None = None
+    push_copy: str | None = None
+    summary = ""
+    cal_ev: str | None = None
+    try:
+        with SessionLocal() as db:
+            b, cal_ev = _do_cancel_booking(booking_id, db)
+            cust = db.query(User).filter(User.id == b.user_id).first()
+            if cust and cust.line_user_id:
+                customer_line = cust.line_user_id
+            push_copy = _booking_rejected_text(b)
+            date_str = b.booking_date.strftime("%Y/%m/%d %H:%M")
+            summary = f"預約 #{b.id}（{date_str}）已取消，通知已送出。"
+    except HTTPException as exc:
+        return f"操作失敗：{exc.detail}"
+
+    _bg_delete_google_calendar_event(cal_ev)
+    if customer_line and access_token and push_copy:
+        _bg_line_push_safe(access_token, customer_line, push_copy)
+    return summary
+
+
+def _handle_owner_complete_sync(
+    cmd: str,
+    source_user_id: str,
+    owner_line_id: str,
+) -> str:
+    """Webhook 業主「完成{id}」指令處理（同步背景版本）。"""
+    if not owner_line_id or source_user_id != owner_line_id:
+        return "您無權執行此操作"
+    raw_id = cmd.removeprefix("完成").strip().lstrip("#").strip()
+    if not raw_id.isdigit():
+        return "格式錯誤，請使用：完成 {預約編號}"
+    booking_id = int(raw_id)
+    try:
+        with SessionLocal() as db:
+            b = _do_complete_booking(booking_id, db)
+            date_str = b.booking_date.strftime("%Y/%m/%d %H:%M")
+            summary = f"預約 #{b.id}（{date_str}）已標記完成。"
+    except HTTPException as exc:
+        return f"操作失敗：{exc.detail}"
+
+    _bg_sync_complete_booking_google_calendar(booking_id)
+    return summary
+
+
+def _process_line_webhook_event(event: dict, access_token: str) -> None:
+    """背景處理單一 LINE webhook event，避免在 request path 做外部 I/O。"""
+    event_id = event.get("webhookEventId")
+    if not event_id:
+        return
+
+    event_type = event.get("type")
+    reply_token = event.get("replyToken")
+    message_type = (event.get("message") or {}).get("type")
+    message_text = (event.get("message") or {}).get("text")
+    preview_text = (message_text or "")[:200]
+    source_uid = (event.get("source") or {}).get("userId", "")
+    print(
+        f"[line_webhook] event.type={event_type} webhookEventId={event_id} "
+        f"replyToken_present={bool(reply_token)} message.type={message_type} "
+        f"message.text_preview={preview_text} source.userId={source_uid}"
+    )
+
+    if not (event_type == "message" and message_type == "text" and reply_token):
+        return
+
+    cmd = (message_text or "").strip()
+    owner_line_id = os.getenv("OWNER_LINE_USER_ID", "").strip()
+
+    if cmd.lower() == "help":
+        reply_text = _help_text()
+    elif cmd == "服務":
+        with SessionLocal() as db_svc:
+            services = db_svc.query(Service).all()
+            reply_text = _format_services_text(services)
+    elif cmd.startswith("確認"):
+        reply_text = _handle_owner_confirm_sync(cmd, source_uid, owner_line_id, access_token)
+    elif cmd.startswith("取消") or cmd.startswith("拒絕"):
+        reply_text = _handle_owner_cancel_sync(cmd, source_uid, owner_line_id, access_token)
+    elif cmd.startswith("完成"):
+        reply_text = _handle_owner_complete_sync(cmd, source_uid, owner_line_id)
+    else:
+        reply_text = f"收到：{cmd}\n\n（輸入 help 查看可用指令）"
+
+    try:
+        _reply_text_to_line_sync(
+            access_token=access_token,
+            reply_token=reply_token,
+            text=reply_text,
+        )
+    except Exception as exc:
+        print(f"[line_webhook] reply 失敗 event_id={event_id}: {exc}")
+
+
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     """健康檢查（含 DB ping，同時防止 Render 休眠與 Supabase 7 天暫停）"""
@@ -642,85 +801,15 @@ async def line_webhook(
         event_id = event.get("webhookEventId")
         if not event_id:
             continue
-
-        # Debug: 印出你真正收到的 LINE webhook 結構（避免把訊息全文印太長）
-        event_type = event.get("type")
-        reply_token = event.get("replyToken")
-        message_type = (event.get("message") or {}).get("type")
-        message_text = (event.get("message") or {}).get("text")
-        preview_text = (message_text or "")[:200]
-        source_uid = (event.get("source") or {}).get("userId", "")
-        print(
-            f"[line_webhook] event.type={event_type} webhookEventId={event_id} "
-            f"replyToken_present={bool(reply_token)} message.type={message_type} "
-            f"message.text_preview={preview_text} source.userId={source_uid}"
-        )
-
-        with SessionLocal() as db:
-            exists = (
-                db.query(LineWebhookEvent)
-                .filter(LineWebhookEvent.event_id == event_id)
-                .first()
-            )
-            if exists:
-                duplicated += 1
-                continue
-
-        reply_text: str | None = None
-        if event_type == "message" and message_type == "text" and reply_token:
-            cmd = (message_text or "").strip()
-            source_user_id = (event.get("source") or {}).get("userId", "")
-            owner_line_id = os.getenv("OWNER_LINE_USER_ID", "").strip()
-
-            if cmd.lower() == "help":
-                reply_text = _help_text()
-            elif cmd == "服務":
-                with SessionLocal() as db_svc:
-                    services = db_svc.query(Service).all()
-                    reply_text = _format_services_text(services)
-            elif cmd.startswith("確認"):
-                reply_text = await _handle_owner_confirm(
-                    cmd=cmd,
-                    source_user_id=source_user_id,
-                    owner_line_id=owner_line_id,
-                    access_token=access_token,
-                    background_tasks=background_tasks,
-                )
-            elif cmd.startswith("取消") or cmd.startswith("拒絕"):
-                reply_text = await _handle_owner_cancel(
-                    cmd=cmd,
-                    source_user_id=source_user_id,
-                    owner_line_id=owner_line_id,
-                    access_token=access_token,
-                    background_tasks=background_tasks,
-                )
-            elif cmd.startswith("完成"):
-                reply_text = await _handle_owner_complete(
-                    cmd=cmd,
-                    source_user_id=source_user_id,
-                    owner_line_id=owner_line_id,
-                    access_token=access_token,
-                    background_tasks=background_tasks,
-                )
-            else:
-                reply_text = f"收到：{cmd}\n\n（輸入 help 查看可用指令）"
-
-            # Webhook 先快速回 200，LINE reply API 改為背景執行，避免請求逾時重送。
-            background_tasks.add_task(
-                _reply_text_to_line,
-                access_token=access_token,
-                reply_token=reply_token,
-                text=reply_text,
-            )
-
         try:
+            # 先入庫去重，再將實際處理排到背景，讓 webhook 儘速回 200。
             with SessionLocal() as db_ins:
                 db_ins.add(LineWebhookEvent(event_id=event_id))
                 db_ins.commit()
         except IntegrityError:
-            # 併發重送同一 event_id 時，unique 約束與去重查詢競態
             duplicated += 1
             continue
+        background_tasks.add_task(_process_line_webhook_event, event, access_token)
         processed += 1
 
     return {"status": "ok", "processed": processed, "duplicated": duplicated}
