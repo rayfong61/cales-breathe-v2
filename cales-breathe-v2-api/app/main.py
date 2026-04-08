@@ -1271,10 +1271,14 @@ def legacy_create_order(
 
     if client_id is None and not guest_name:
         target_user_id = actor.id
-    else:
-        # 若有帶 client_id 或 guest_name，僅允許 owner 使用
-        if actor.role != "owner":
+    elif actor.role != "owner":
+        # 一般客人可明確帶自己的 client_id（舊前端習慣），但不可代他人也不可帶 guest_name。
+        requested_user_id = int(client_id) if client_id is not None else None
+        if guest_name or requested_user_id != actor.id:
             raise HTTPException(403, "僅限 owner 可代客建立預約")
+        target_user_id = actor.id
+    else:
+        # owner 代客（會員或訪客）
         add_by_owner = actor.id
         if client_id is not None:
             target_user_id = int(client_id)
