@@ -33,13 +33,13 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from sqlalchemy import delete, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from passlib.context import CryptContext
 
 from app.database import get_db, init_db, SessionLocal
-from app.models import User, Service, Booking, LineWebhookEvent
+from app.models import User, Service, Booking, LineWebhookEvent, booking_services
 from app import google_calendar as gcal
 from app.schemas import (
     ServiceRead,
@@ -958,6 +958,10 @@ def legacy_logout(response: Response):
 def legacy_delete_account(request: Request, response: Response, db: Session = Depends(get_db)):
     """刪除目前登入會員帳號（含其預約）並清除登入 cookie。"""
     user = _get_current_user_from_cookie(request, db)
+    # 預約–服務多對多列必須先刪，否則外鍵會阻擋刪除 bookings（PostgreSQL 等）。
+    booking_ids = [bid for (bid,) in db.query(Booking.id).filter(Booking.user_id == user.id).all()]
+    if booking_ids:
+        db.execute(delete(booking_services).where(booking_services.c.booking_id.in_(booking_ids)))
     db.query(Booking).filter(Booking.user_id == user.id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
