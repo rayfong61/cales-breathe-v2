@@ -1,7 +1,7 @@
 import axios from "axios";
 import { useState, useEffect } from "react";
 import { useAuth } from "../components/AuthContext";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 const isLineWebview = /Line\//i.test(navigator.userAgent);
 
@@ -118,44 +118,16 @@ function BookingClientContent() {
     }
   };
 
+  // 整頁導向 OAuth（與 Login.jsx 相同）：避免 Android / LINE 上 window.open、
+  // opener 斷線導致 postMessage 失敗、登入 cookie 與父頁不同步。
   const handleGoogleLogin = () => {
     const fo = encodeURIComponent(window.location.origin);
-    const loginWindow = window.open(
-      `${api}/auth/google?redirect=/booking-step3&frontend_origin=${fo}`,
-      "_blank",
-      "width=500,height=600"
-    );
-
-    const receiveMessage = (event) => {
-      // OAuth callback 執行在後端 origin（onrender.com），不是 Vercel proxy origin
-      // 只檢查訊息內容即可；login-success 為足夠具體的標記
-      if (event.data === "login-success") {
-        window.removeEventListener("message", receiveMessage);
-        loginWindow?.close();
-        window.location.reload();
-      }
-    };
-
-    window.addEventListener("message", receiveMessage);
+    window.location.href = `${api}/auth/google?redirect=/booking-step3&frontend_origin=${fo}`;
   };
 
   const handleLineLogin = () => {
     const fo = encodeURIComponent(window.location.origin);
-    const loginWindow = window.open(
-      `${api}/auth/line?redirect=/booking-step3&frontend_origin=${fo}`,
-      "_blank",
-      "width=500,height=600"
-    );
-
-    const receiveMessage = (event) => {
-      if (event.data === "login-success") {
-        window.removeEventListener("message", receiveMessage);
-        loginWindow?.close();
-        window.location.reload();
-      }
-    };
-
-    window.addEventListener("message", receiveMessage);
+    window.location.href = `${api}/auth/line?redirect=/booking-step3&frontend_origin=${fo}`;
   };
 
   const handleLogin = async (e) => {
