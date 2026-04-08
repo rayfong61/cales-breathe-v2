@@ -73,6 +73,12 @@ function BookingClientContent() {
     }
   }, [user, bookingData]);
 
+  // 送出成功後自動回到頁面上方，避免使用者需要手動往上捲才看到成功提示。
+  useEffect(() => {
+    if (!isSubmitted) return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [isSubmitted]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData) return;
