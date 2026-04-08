@@ -212,7 +212,9 @@ function Account() {
                             
 
                     <nav className="text-base my-3 flex justify-center gap-2 text-center">
-                        <div className={`hover:bg-red-300 hover:underline cursor-pointer py-3 rounded-full w-25 ${isBooking ? 'bg-red-200' : ''}`} onClick={toggleToBooking}>預約紀錄</div>
+                        <div className={`hover:bg-red-300 hover:underline cursor-pointer py-3 rounded-full w-25 ${isBooking ? 'bg-red-200' : ''}`} onClick={toggleToBooking}>
+                          {user?.role === "owner" ? "代訂紀錄" : "預約紀錄"}
+                        </div>
 
                         <div className={`hover:bg-red-300 hover:underline cursor-pointer py-3 rounded-full w-25 ${!isBooking ? 'bg-red-200' : ''}`} onClick={toggleToAditing}>個人資料</div>
 

@@ -20,6 +20,12 @@ function BookingClientContent() {
   const [note, setNote] = useState("");
   const [contactMail, setContactMail] = useState("");
   const [password, setPassword] = useState("");
+  // 業主代客預約：客人選擇相關 state
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerResults, setCustomerResults] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [guestName, setGuestName] = useState("");
+  const [customerError, setCustomerError] = useState("");
 
   // 取得 localStorage 的預約資料
   useEffect(() => {
@@ -73,23 +79,50 @@ function BookingClientContent() {
     setInputError("");
     setMobileError("");
     setMessage("");
+    setCustomerError("");
 
     if (!name.trim() || !mobile.trim()) {
       setInputError("姓名與手機為必填欄位");
       return;
     }
 
+    // 若為 owner，需檢查是否有選擇會員或輸入訪客姓名（擇一）
+    let payload = { ...formData };
+    const trimmedName = name.trim();
+    const trimmedMobile = mobile.trim();
+    if (user?.role === "owner") {
+      const trimmedGuest = guestName.trim();
+      if (!selectedCustomer && !trimmedGuest) {
+        setCustomerError("請選擇已註冊客人，或填寫訪客姓名");
+        return;
+      }
+      if (selectedCustomer) {
+        payload.client_id = selectedCustomer.id;
+        payload.guest_name = null;
+        payload.customer_name = trimmedName;
+        payload.customer_mobile = trimmedMobile;
+      } else {
+        payload.client_id = null;
+        payload.guest_name = trimmedGuest;
+        payload.customer_name = trimmedName;
+        payload.customer_mobile = trimmedMobile;
+      }
+    }
+
     try {
-      // 1. 更新使用者資料
-      await axios.put(`${api}/account/update2`, {
-        client_name: name.trim(),
-        contact_mobile: mobile.trim(),
-      }, { withCredentials: true });
+      // 1. 非 owner 情境才更新當前登入者資料。
+      // owner 代客預約（會員/訪客）避免誤改到業主自己的姓名/手機。
+      if (user?.role !== "owner") {
+        await axios.put(`${api}/account/update2`, {
+          client_name: trimmedName,
+          contact_mobile: trimmedMobile,
+        }, { withCredentials: true });
+      }
 
       // 2. 提交預約資料
       const res = await axios.post(`${api}/orders`, {
-        ...formData,
-        booking_detail: JSON.stringify(formData.booking_detail),
+        ...payload,
+        booking_detail: JSON.stringify(payload.booking_detail),
         booking_note: note.trim() || null
       }, { withCredentials: true });
 
@@ -115,6 +148,28 @@ function BookingClientContent() {
       }
       setMessage(detail || err.response?.data?.message || "預約失敗");
       console.error(err);
+    }
+  };
+
+  // -------------------------------
+  // 業主代客預約：客人搜尋與選擇
+  // -------------------------------
+  const handleSearchCustomers = async () => {
+    setCustomerError("");
+    const q = customerQuery.trim();
+    if (!q) {
+      setCustomerResults([]);
+      return;
+    }
+    try {
+      const res = await axios.get(`${api}/customers/search`, {
+        params: { q },
+        withCredentials: true,
+      });
+      setCustomerResults(res.data || []);
+    } catch (err) {
+      console.error("搜尋客人失敗", err);
+      setCustomerError(err?.response?.data?.detail || "搜尋客人失敗");
     }
   };
 
@@ -215,12 +270,16 @@ function BookingClientContent() {
     return (
       <div className="max-w-xl mx-auto p-20 my-10 bg-white rounded-xl shadow-md text-center">
         
-        <h2 className="text-xl font-bold mb-2">預約已送出！</h2>
-        <p className="text-gray-500 text-lg mb-6">
-          預約審核中，業主確認後將透過 LINE 或電話通知您。
-        </p>
+        <h2 className="text-xl font-bold mb-2">
+          {user?.role === "owner" ? "代客預約已送出！" : "預約已送出！"}
+        </h2>
+        {user?.role !== "owner" && (
+          <p className="text-gray-500 text-lg mb-6">
+            預約審核中，業主確認後將透過 LINE 或電話通知您。
+          </p>
+        )}
 
-        {lineAddFriendUrl && !user?.line_user_id && (
+        {user?.role !== "owner" && lineAddFriendUrl && !user?.line_user_id && (
           <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
             <p className="text-md text-green-800 font-medium mb-3">
               歡迎加入 LINE 好友，即時接收最新預約通知!
@@ -253,9 +312,94 @@ function BookingClientContent() {
 
   return (
     <div className="max-w-xl mx-auto p-6 my-6 bg-white rounded-xl shadow-md">
-      <h2 className="text-xl font-bold mb-4">請確認以下內容是否正確:</h2>
+      <h2 className="text-xl font-bold mb-4">
+        {user?.role === "owner" ? "請確認以下代客預約內容是否正確:" : "請確認以下內容是否正確:"}
+      </h2>
       
       <form onSubmit={handleSubmit} className="px-2 ">
+
+        {/* 業主代客預約：客人選擇區塊 */}
+        {user?.role === "owner" && (
+          <div className="mb-4 border border-dashed border-rose-300 rounded-lg p-3 bg-rose-50">
+            <h3 className="font-semibold mb-2">代客預約 - 選擇客人</h3>
+
+            <label className="block text-sm mb-1">搜尋已註冊客人（姓名關鍵字）</label>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                value={customerQuery}
+                onChange={(e) => setCustomerQuery(e.target.value)}
+                className="border p-2 rounded flex-1"
+                placeholder="例如：小美"
+              />
+              <button
+                type="button"
+                onClick={handleSearchCustomers}
+                className="px-3 py-2 bg-rose-400 hover:bg-rose-300 text-white rounded cursor-pointer"
+              >
+                搜尋
+              </button>
+            </div>
+
+            {customerResults.length > 0 && (
+              <ul className="max-h-40 overflow-y-auto mb-2 border rounded">
+                {customerResults.map((c) => (
+                  <li
+                    key={c.id}
+                    className={`flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-rose-100 ${
+                      selectedCustomer?.id === c.id ? "bg-rose-100" : ""
+                    }`}
+                    onClick={() => {
+                      setSelectedCustomer(c);
+                      setGuestName("");
+                      setCustomerError("");
+                      setName(c.name || "");
+                      setMobile(c.phone || "");
+                    }}
+                  >
+                    {c.photo && (
+                      <img
+                        src={c.photo}
+                        alt={c.name}
+                        className="w-6 h-6 rounded-full object-cover"
+                      />
+                    )}
+                    <span className="text-sm">
+                      {c.name}（ID: {c.id}）
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {selectedCustomer && (
+              <p className="text-sm text-rose-700 mb-2">
+                已選擇客人：{selectedCustomer.name}（ID: {selectedCustomer.id}）
+              </p>
+            )}
+
+            <div className="mt-2">
+              <label className="block text-sm mb-1">或改為輸入訪客姓名</label>
+              <input
+                type="text"
+                value={guestName}
+                onChange={(e) => {
+                  setGuestName(e.target.value);
+                  if (e.target.value.trim()) {
+                    setSelectedCustomer(null);
+                  }
+                  setCustomerError("");
+                }}
+                className="border p-2 rounded w-full"
+                placeholder="訪客姓名（無會員帳號時使用）"
+              />
+            </div>
+
+            {customerError && (
+              <p className="text-red-500 text-sm mt-1">{customerError}</p>
+            )}
+          </div>
+        )}
 
         <h3 className="block my-2 font-semibold">聯絡資訊：</h3>
 
@@ -303,7 +447,7 @@ function BookingClientContent() {
 
         <button type="submit"
                 className="bg-rose-500 hover:bg-rose-600 text-white px-4 py-2 rounded w-30 cursor-pointer my-2 block mx-auto">
-          送出預約
+          {user?.role === "owner" ? "送出代客預約" : "送出預約"}
         </button>
         {message && <p className="text-rose-400 text-center text-xl font-bold py-3">{message}</p>}
       </form>

@@ -41,7 +41,12 @@ class User(Base):
     role = Column(String(20), default="customer")  # customer | owner
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    bookings = relationship("Booking", back_populates="user")
+    # 使用 Booking.user_id 作為關聯鍵（避免與 created_by_owner_id 產生歧義）。
+    bookings = relationship(
+        "Booking",
+        back_populates="user",
+        foreign_keys="Booking.user_id",
+    )
 
 
 class Service(Base):
@@ -64,7 +69,14 @@ class Booking(Base):
     __tablename__ = "bookings"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # 被預約的客人（會員）；若為訪客預約，可為空。
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # 訪客姓名（非會員時使用）。
+    guest_name = Column(String(100), nullable=True)
+    # 訪客手機（非會員時使用）。
+    guest_phone = Column(String(20), nullable=True)
+    # 代客建立的業主 id；一般客人自行預約時為空。
+    created_by_owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     booking_date = Column(DateTime, nullable=False)
     total_duration_minutes = Column(Integer, nullable=False)
     total_price = Column(Integer, nullable=False)
@@ -73,7 +85,7 @@ class Booking(Base):
     google_calendar_event_id = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    user = relationship("User", back_populates="bookings")
+    user = relationship("User", back_populates="bookings", foreign_keys=[user_id])
     services = relationship(
         "Service", secondary=booking_services, back_populates="bookings"
     )

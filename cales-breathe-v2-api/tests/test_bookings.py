@@ -172,7 +172,7 @@ def test_owner_can_create_booking_for_customer(client, monkeypatch):
     assert response.status_code == 200
     booking = response.json()
     assert booking["user_id"] == customer_id
-    assert booking["status"] == "pending"
+    assert booking["status"] == "confirmed"
     assert len(booking["services"]) == 1
 
 

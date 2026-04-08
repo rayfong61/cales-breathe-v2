@@ -1,6 +1,6 @@
 """Pydantic 請求/回應 Schema"""
 from datetime import datetime, date
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class ServiceBase(BaseModel):
@@ -53,8 +53,14 @@ class UserRead(UserBase):
 
 
 class BookingCreate(BaseModel):
-    user_id: int
+    # 被預約的會員 id；若為訪客可為 None
+    user_id: int | None = None
+    # 代客建立的業主 id（僅 owner 可帶）
     add_by_owner: int | None = None
+    # 訪客姓名（非會員時使用）
+    guest_name: str | None = None
+    # 訪客手機（非會員時使用）
+    guest_phone: str | None = None
     service_ids: list[int]
     booking_date: datetime
     notes: str | None = None
@@ -66,6 +72,28 @@ class BookingCreate(BaseModel):
             raise ValueError("至少需選擇一項服務")
         return v
 
+    @field_validator("guest_name")
+    @classmethod
+    def strip_guest_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        return v or None
+
+    @field_validator("guest_phone")
+    @classmethod
+    def strip_guest_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        return v or None
+
+    @model_validator(mode="after")
+    def ensure_user_or_guest(self):
+        if self.user_id is None and not self.guest_name:
+            raise ValueError("user_id 與 guest_name 至少需擇一提供")
+        return self
+
 
 class BookingCancel(BaseModel):
     """取消預約時須帶入操作者 user_id（預約本人或 owner）"""
@@ -74,12 +102,15 @@ class BookingCancel(BaseModel):
 
 class BookingRead(BaseModel):
     id: int
-    user_id: int
+    user_id: int | None
     booking_date: datetime
     total_duration_minutes: int
     total_price: int
     status: str
     notes: str | None
+    guest_name: str | None = None
+    guest_phone: str | None = None
+    created_by_owner_id: int | None = None
     google_calendar_event_id: str | None = None
     created_at: datetime
     services: list[ServiceRead] = []
@@ -137,3 +168,10 @@ class LegacyOrderRead(BaseModel):
     is_cancelled: bool
     status: str                # pending | confirmed | cancelled | completed
     booking_detail: LegacyOrderDetail
+    # 代客/訪客資訊（若有）
+    guest_name: str | None = None
+    created_by_owner_id: int | None = None
+    customer_id: int | None = None
+    customer_name: str | None = None
+    customer_photo: str | None = None
+    customer_phone: str | None = None

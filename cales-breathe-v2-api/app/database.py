@@ -102,10 +102,21 @@ def init_db():
 def _ensure_sqlite_columns():
     """對既有 SQLite 檔做最小欄位補齊（避免本機測試每次刪 DB）。"""
     with engine.begin() as conn:
-        rows = conn.execute(text("PRAGMA table_info(users)")).fetchall()
-        cols = {str(r[1]) for r in rows}
-        if "google_user_id" not in cols:
+        # users 表欄位補強
+        user_rows = conn.execute(text("PRAGMA table_info(users)")).fetchall()
+        user_cols = {str(r[1]) for r in user_rows}
+        if "google_user_id" not in user_cols:
             conn.execute(text("ALTER TABLE users ADD COLUMN google_user_id VARCHAR(100)"))
         conn.execute(
             text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_user_id ON users (google_user_id)")
         )
+
+        # bookings 表欄位補強（guest_name, created_by_owner_id）
+        booking_rows = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        booking_cols = {str(r[1]) for r in booking_rows}
+        if "guest_name" not in booking_cols:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN guest_name VARCHAR(100)"))
+        if "guest_phone" not in booking_cols:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN guest_phone VARCHAR(20)"))
+        if "created_by_owner_id" not in booking_cols:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN created_by_owner_id INTEGER"))

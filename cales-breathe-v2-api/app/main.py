@@ -189,6 +189,7 @@ def _legacy_user_shape(user: User) -> dict:
         "photo": user.photo,
         "birthday": user.birthday.isoformat() if user.birthday else None,
         "address": user.address,
+        "role": user.role,
     }
 
 
@@ -1187,7 +1188,7 @@ def legacy_unavailable_dates(db: Session = Depends(get_db)):
     return full_days
 
 
-def _legacy_order_from_booking(booking: Booking, services: list[Service]) -> dict:
+def _legacy_order_from_booking(booking: Booking, services: list[Service], customer: User | None = None) -> dict:
     # 以 v2 status 作為來源
     booking_date_str = booking.booking_date.date().isoformat()
     booking_time_str = booking.booking_date.time().strftime("%H:%M:%S")
@@ -1196,7 +1197,7 @@ def _legacy_order_from_booking(booking: Booking, services: list[Service]) -> dic
     service_names = [s.name for s in services if not s.category.startswith("addon-")]
     addon_names = [s.name for s in services if s.category.startswith("addon-")]
 
-    return {
+    data = {
         "id": booking.id,
         "booking_date": booking_date_str,
         "booking_time": booking_time_str,
@@ -1210,6 +1211,14 @@ def _legacy_order_from_booking(booking: Booking, services: list[Service]) -> dic
             "addons": addon_names,
         },
     }
+    # 代客/訪客資訊（若有）
+    data["guest_name"] = booking.guest_name
+    data["created_by_owner_id"] = booking.created_by_owner_id
+    data["customer_id"] = customer.id if customer else None
+    data["customer_name"] = customer.name if customer else booking.guest_name
+    data["customer_photo"] = customer.photo if customer else None
+    data["customer_phone"] = customer.phone if customer else booking.guest_phone
+    return data
 
 
 @app.post("/orders")
@@ -1226,8 +1235,8 @@ def legacy_create_order(
     - 取 booking_detail（JSON 字串）拆 services/addons 中文名稱
     - 映射成 v2 service_ids 後呼叫 v2 create_booking 邏輯
     """
-    user = _get_current_user_from_cookie(request, db)
-    if not user.phone:
+    actor = _get_current_user_from_cookie(request, db)
+    if not actor.phone:
         raise HTTPException(400, "請先填寫手機")
 
     booking_date = payload.get("booking_date")
@@ -1249,10 +1258,53 @@ def legacy_create_order(
     service_ids = _service_ids_from_legacy_detail(db, service_names, addon_names)
 
     notes = payload.get("booking_note")
+    customer_name = (payload.get("customer_name") or "").strip()
+    customer_mobile = (payload.get("customer_mobile") or "").strip()
+
+    # 代客/訪客資訊
+    client_id = payload.get("client_id")
+    guest_name = (payload.get("guest_name") or "").strip() or None
+
+    # 一般客人走舊邏輯：未提供 client_id/guest_name 時，預設為自己
+    target_user_id: int | None = None
+    add_by_owner: int | None = None
+
+    if client_id is None and not guest_name:
+        target_user_id = actor.id
+    else:
+        # 若有帶 client_id 或 guest_name，僅允許 owner 使用
+        if actor.role != "owner":
+            raise HTTPException(403, "僅限 owner 可代客建立預約")
+        add_by_owner = actor.id
+        if client_id is not None:
+            target_user_id = int(client_id)
+
+    # 業主代訂「已註冊客人」時，同步更新客人基本資料。
+    if actor.role == "owner" and target_user_id is not None and target_user_id != actor.id:
+        target_user = db.query(User).filter(User.id == target_user_id).first()
+        if not target_user:
+            raise HTTPException(404, "客人不存在")
+
+        if customer_mobile:
+            existing = (
+                db.query(User)
+                .filter(User.phone == customer_mobile, User.id != target_user.id)
+                .first()
+            )
+            if existing:
+                raise HTTPException(409, "此手機已被其他會員使用，請改填其他號碼。")
+            target_user.phone = customer_mobile
+        if customer_name:
+            target_user.name = customer_name
+        db.commit()
 
     # 直接呼叫 v2 booking 建立邏輯
+    guest_phone = customer_mobile if guest_name else None
     booking_create = BookingCreate(
-        user_id=user.id,
+        user_id=target_user_id,
+        add_by_owner=add_by_owner,
+        guest_name=guest_name,
+        guest_phone=guest_phone,
         service_ids=service_ids,
         booking_date=when,
         notes=notes,
@@ -1283,15 +1335,59 @@ def legacy_list_orders(client_id: int = Query(...), request: Request = None, db:
 
     bookings = (
         db.query(Booking)
-        .options(joinedload(Booking.services))
+        .options(joinedload(Booking.services), joinedload(Booking.user))
         .filter(Booking.user_id == client_id)
         .order_by(Booking.booking_date.desc())
         .all()
     )
     return [
-        LegacyOrderRead.model_validate(_legacy_order_from_booking(b, b.services))
+        LegacyOrderRead.model_validate(_legacy_order_from_booking(b, b.services, b.user))
         for b in bookings
     ]
+
+
+@app.get("/owner/orders", response_model=list[LegacyOrderRead])
+def legacy_owner_list_orders(request: Request, db: Session = Depends(get_db)):
+    """業主查看代客預約紀錄（含客人資訊）。"""
+    actor = _get_current_user_from_cookie(request, db)
+    if actor.role != "owner":
+        raise HTTPException(403, "僅限 owner")
+
+    bookings = (
+        db.query(Booking)
+        .options(joinedload(Booking.services), joinedload(Booking.user))
+        .filter(Booking.created_by_owner_id == actor.id)
+        .order_by(Booking.booking_date.desc())
+        .all()
+    )
+    return [
+        LegacyOrderRead.model_validate(_legacy_order_from_booking(b, b.services, b.user))
+        for b in bookings
+    ]
+
+
+@app.get("/customers/search", response_model=list[UserRead])
+def search_customers(q: str = Query(..., min_length=1), request: Request = None, db: Session = Depends(get_db)):
+    """
+    業主用客人搜尋（依姓名模糊查詢）。
+    僅限 owner 呼叫。
+    """
+    actor = _get_current_user_from_cookie(request, db)
+    if actor.role != "owner":
+        raise HTTPException(403, "僅限 owner 可搜尋客人")
+
+    keyword = q.strip()
+    if not keyword:
+        return []
+
+    rows = (
+        db.query(User)
+        .filter(User.name.ilike(f"%{keyword}%"))
+        .order_by(User.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return [UserRead.model_validate(u) for u in rows]
 
 
 @app.put("/orders/cancel/{booking_id}")
@@ -1315,7 +1411,7 @@ def legacy_cancel_order(
         return {"message": "預約已取消"}
     if b.status not in ("pending", "confirmed"):
         raise HTTPException(400, f"無法取消狀態為「{b.status}」的預約")
-    if b.status == "confirmed":
+    if b.status == "confirmed" and user.role != "owner":
         _assert_cancel_time_window(b)
 
     cal_event_id = b.google_calendar_event_id
@@ -1358,11 +1454,18 @@ def create_booking(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """建立預約（支援多服務），檢查 X選1 與時段衝突"""
-    target_user = db.query(User).filter(User.id == data.user_id).first()
-    if not target_user:
-        raise HTTPException(404, "使用者不存在")
+    """建立預約（支援多服務），檢查 X選1 與時段衝突。
 
+    - 一般客人：帶 user_id，自行預約。
+    - 業主代客：add_by_owner 為 owner id，可搭配 user_id（會員客人）或 guest_name（訪客）。
+    """
+    target_user = None
+    if data.user_id is not None:
+        target_user = db.query(User).filter(User.id == data.user_id).first()
+        if not target_user:
+            raise HTTPException(404, "使用者不存在")
+
+    owner = None
     if data.add_by_owner is not None:
         owner = db.query(User).filter(User.id == data.add_by_owner).first()
         if not owner:
@@ -1393,12 +1496,16 @@ def create_booking(
         if start < b_end and b.booking_date < end:
             raise HTTPException(409, "該時段已被預約")
 
+    status = "confirmed" if data.add_by_owner is not None else "pending"
     booking = Booking(
         user_id=data.user_id,
+        guest_name=data.guest_name,
+        guest_phone=data.guest_phone,
+        created_by_owner_id=data.add_by_owner,
         booking_date=data.booking_date,
         total_duration_minutes=total_duration,
         total_price=total_price,
-        status="pending",
+        status=status,
         notes=data.notes,
     )
     booking.services = services
@@ -1406,11 +1513,26 @@ def create_booking(
     db.commit()
     db.refresh(booking)
 
-    background_tasks.add_task(
-        _bg_after_booking_created_calendar_and_line,
-        booking.id,
-        data.user_id,
-    )
+    if data.add_by_owner is not None:
+        # 代客預約：直接已確認，通知客人並同步 Google Calendar confirmed 狀態。
+        if booking.user_id:
+            customer = db.query(User).filter(User.id == booking.user_id).first()
+            if customer and customer.line_user_id:
+                access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+                if access_token:
+                    background_tasks.add_task(
+                        _bg_line_push_safe,
+                        access_token,
+                        customer.line_user_id,
+                        _booking_confirmed_text(booking),
+                    )
+        background_tasks.add_task(_bg_sync_confirm_booking_google_calendar, booking.id)
+    else:
+        background_tasks.add_task(
+            _bg_after_booking_created_calendar_and_line,
+            booking.id,
+            booking.user_id or 0,
+        )
 
     return _booking_to_read(booking)
 
@@ -1682,6 +1804,9 @@ def _booking_to_read(booking: Booking) -> BookingRead:
         notes=booking.notes,
         google_calendar_event_id=booking.google_calendar_event_id,
         created_at=booking.created_at,
+        guest_name=booking.guest_name,
+        guest_phone=booking.guest_phone,
+        created_by_owner_id=booking.created_by_owner_id,
         services=[ServiceRead.model_validate(s) for s in booking.services],
     )
 

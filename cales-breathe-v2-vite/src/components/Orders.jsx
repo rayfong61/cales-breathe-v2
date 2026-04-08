@@ -54,10 +54,11 @@ function Orders() {
 
     const fetchOrders = async () => {
       try {
-        const res = await axios.get(`${api}/orders`, {
-          params: { client_id: user.id },
-          withCredentials: true
-        });
+        const endpoint = user?.role === "owner" ? `${api}/owner/orders` : `${api}/orders`;
+        const reqConfig = user?.role === "owner"
+          ? { withCredentials: true }
+          : { params: { client_id: user.id }, withCredentials: true };
+        const res = await axios.get(endpoint, reqConfig);
         setOrders(res.data);
         // console.log(res.data);
       } catch (err) {
@@ -110,7 +111,9 @@ function Orders() {
             });
             const detail = order.booking_detail;
             const bookingDateTime = new Date(`${order.booking_date}T${order.booking_time}`);
-            const canCancel = bookingDateTime >= new Date() && !order.is_cancelled;
+            const canCancel = user?.role === "owner"
+              ? !order.is_cancelled
+              : bookingDateTime >= new Date() && !order.is_cancelled;
 
             const statusMap = {
               pending:   { label: "確認中", cls: "bg-yellow-100 text-yellow-700 border border-yellow-300" },
@@ -128,13 +131,39 @@ function Orders() {
                     {statusInfo.label}
                   </span>
                 </div>
-                <p><strong>預約日期：</strong>{formattedDate}</p>
-                <p><strong>時間：</strong>{order.booking_time.slice(0,5)}</p>   
-                <p><strong>服務內容：</strong>{detail.services?.join("、")}</p>
-                <p><strong>加購項目：</strong>{detail.addons?.join("、") || "無"}</p>
-                <p><strong>總價格：</strong>${order.total_price}</p>
-                <p><strong>總時長：</strong>{order.total_duration} 分鐘</p>
-                <p><strong>備註：</strong>{order.booking_note} </p>
+                <div className="space-y-1">
+                  {user?.role === "owner" && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                    {order.customer_photo && (
+                      <img
+                        src={order.customer_photo}
+                        alt={order.customer_name || "客人"}
+                        className="w-8 h-8 rounded-full object-cover"
+                      />
+                    )}
+                    <p>
+                      <strong>客人：</strong>
+                      {order.customer_name || "訪客"}
+                      {order.customer_id ? ` (ID: ${order.customer_id})` : ""}
+                    </p>
+                      </div>
+                      {order.customer_phone && (
+                        <p>
+                        <strong>手機：</strong>
+                        {order.customer_phone}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <p><strong>預約日期：</strong>{formattedDate}</p>
+                  <p><strong>時間：</strong>{order.booking_time.slice(0,5)}</p>   
+                  <p><strong>服務內容：</strong>{detail.services?.join("、")}</p>
+                  <p><strong>加購項目：</strong>{detail.addons?.join("、") || "無"}</p>
+                  <p><strong>總價格：</strong>${order.total_price}</p>
+                  <p><strong>總時長：</strong>{order.total_duration} 分鐘</p>
+                  <p><strong>備註：</strong>{order.booking_note} </p>
+                </div>
                 {canCancel && (
                   <button
                     type="button"
