@@ -1,6 +1,7 @@
 # cales-breathe-v2（本機 Docker）
 
-完整開發路線與檢查清單見 **[docs/DOCKER_DEVELOPMENT_PLAN.md](docs/DOCKER_DEVELOPMENT_PLAN.md)**。
+**本機與雲端部署總覽**見 **[docs/本地與雲端部署.md](docs/本地與雲端部署.md)**。  
+本機 Docker 的完整路線與檢查清單見 **[docs/DOCKER_DEVELOPMENT_PLAN.md](docs/DOCKER_DEVELOPMENT_PLAN.md)**。
 
 目錄：
 

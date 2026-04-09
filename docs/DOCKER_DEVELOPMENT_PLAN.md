@@ -1,5 +1,7 @@
 # cales-breathe-v2 Docker 開發計畫
 
+> **總覽**：本機與雲端部署對照請先讀 [`本地與雲端部署.md`](本地與雲端部署.md)。
+
 本文件描述 monorepo 內以 **Docker Compose** 進行本機整合測試、以及後續銜接 **GCP VM** 的開發路線；實作細節以根目錄 [`README.md`](../README.md)、[`docker-compose.yml`](../docker-compose.yml) 為準。
 
 ---

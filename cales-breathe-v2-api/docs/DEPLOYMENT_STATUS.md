@@ -2,6 +2,8 @@
 
 > 最後更新：2026-03-31
 
+**說明**：下表曾以 Render 為後端託管撰寫；目前程式庫之 Vercel API 轉發目標為 **Google Cloud Run**（見根目錄 `docs/本地與雲端部署.md`、`cales-breathe-v2-vite/vercel.json`）。若已全面改為 Cloud Run，以下「後端網址」列僅供對照歷史紀錄。
+
 ---
 
 ## 系統架構

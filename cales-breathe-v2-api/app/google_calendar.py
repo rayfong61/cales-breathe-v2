@@ -47,21 +47,31 @@ def _calendar_id() -> str:
     return os.getenv("GOOGLE_CALENDAR_ID", "primary").strip()
 
 
-def _build_body(booking: Booking, customer: User, status: str) -> dict:
+def _resolve_display_name_phone(booking: Booking, customer: User | None) -> tuple[str, str | None]:
+    """會員預約用 User；代訂訪客用 booking 的 guest 欄位。"""
+    if customer is not None:
+        return customer.name, customer.phone
+    guest_name = (booking.guest_name or "").strip()
+    guest_phone = (booking.guest_phone or "").strip() or None
+    return (guest_name or "訪客"), guest_phone
+
+
+def _build_body(booking: Booking, customer: User | None, status: str) -> dict:
     """組成 Calendar Event body。"""
     start = booking.booking_date
     end = start + timedelta(minutes=booking.total_duration_minutes)
     service_names = "、".join(s.name for s in booking.services)
-    phone_line = f"電話：{customer.phone}\n" if customer.phone else ""
+    cust_name, cust_phone = _resolve_display_name_phone(booking, customer)
+    phone_line = f"電話：{cust_phone}\n" if cust_phone else ""
     notes_line = f"備註：{booking.notes}\n" if booking.notes else ""
     label = _STATUS_LABEL.get(status, status)
     color = _STATUS_COLOR.get(status, "7")
 
     return {
-        "summary": f"{label}：{customer.name}",
+        "summary": f"{label}：{cust_name}",
         "description": (
             f"預約編號：#{booking.id}\n"
-            f"客人：{customer.name}\n"
+            f"客人：{cust_name}\n"
             f"{phone_line}"
             f"服務項目：{service_names}\n"
             f"總費用：${booking.total_price}\n"
@@ -79,7 +89,7 @@ def _build_body(booking: Booking, customer: User, status: str) -> dict:
     }
 
 
-def create_event(booking: Booking, customer: User, status: str = "pending") -> str | None:
+def create_event(booking: Booking, customer: User | None, status: str = "pending") -> str | None:
     """建立行事曆事件，回傳 event_id；失敗時回傳 None（不中斷預約流程）。"""
     service = _get_service()
     if not service:
@@ -100,7 +110,7 @@ def create_event(booking: Booking, customer: User, status: str = "pending") -> s
 def update_event_status(
     event_id: str,
     booking: Booking,
-    customer: User,
+    customer: User | None,
     status: str,
 ) -> None:
     """更新事件的標題與顏色以反映新狀態；失敗只 log，不中斷流程。"""
@@ -114,7 +124,8 @@ def update_event_status(
         event = service.events().get(calendarId=cal_id, eventId=event_id).execute()
 
         # 移除舊狀態前綴，換上新的
-        summary = event.get("summary", f"預約：{customer.name}")
+        cust_name, _ = _resolve_display_name_phone(booking, customer)
+        summary = event.get("summary", f"預約：{cust_name}")
         for prefix in _STATUS_PREFIXES:
             if summary.startswith(f"{prefix}："):
                 summary = summary[len(prefix) + 1:]

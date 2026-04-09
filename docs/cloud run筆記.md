@@ -1,5 +1,7 @@
 # Cloud Run 部署筆記（Cale's Breathe）
 
+> **總覽**：與本機 Docker 的對照與架構圖見 [`本地與雲端部署.md`](本地與雲端部署.md)。
+
 本筆記整理本專案目前採用的部署方式：
 
 - 前端：Vercel（`cales-breathe-v2-vite`）

@@ -133,28 +133,62 @@ function Orders() {
                 </div>
                 <div className="space-y-1">
                   {user?.role === "owner" && (
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                    {order.customer_photo && (
-                      <img
-                        src={order.customer_photo}
-                        alt={order.customer_name || "客人"}
-                        className="w-8 h-8 rounded-full object-cover"
-                      />
-                    )}
-                    <p>
-                      <strong>客人：</strong>
-                      {order.customer_name || "訪客"}
-                      {order.customer_id ? ` (ID: ${order.customer_id})` : ""}
-                    </p>
-                      </div>
-                      {order.customer_phone && (
-                        <p>
-                        <strong>手機：</strong>
-                        {order.customer_phone}
-                        </p>
+                    <div className="my-4 rounded-full bg-gray-100 px-3 py-2.5 flex items-center gap-3">
+                      {order.customer_photo ? (
+                        <img
+                          src={order.customer_photo}
+                          alt=""
+                          className="w-10 h-10 rounded-full object-cover shrink-0"
+                        />
+                      ) : (
+                        <div
+                          className="w-10 h-10 rounded-full bg-gray-200 shrink-0 flex items-center justify-center text-sm font-medium text-gray-600"
+                          aria-hidden
+                        >
+                          {(order.customer_name || "訪").slice(0, 1)}
+                        </div>
                       )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-lg font-semibold text-gray-900 leading-tight truncate">
+                          {order.customer_name || "訪客"}
+                        </p>
+                        {order.customer_id != null && (
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            客人 · ID：{order.customer_id}
+                          </p>
+                        )}
+                      </div>
+                      {order.customer_phone ? (
+                        <a
+                          href={`tel:${String(order.customer_phone).replace(/[^\d+]/g, "")}`}
+                          className="shrink-0 text-gray-600 hover:text-gray-900 p-1 -mr-1 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400"
+                          aria-label={`撥打 ${order.customer_phone}`}
+                          title={order.customer_phone}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            className="w-6 h-6"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                            aria-hidden
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                            />
+                          </svg>
+                        </a>
+                      ) : null}
                     </div>
+                  )}
+                  {user?.role === "owner" && order.customer_phone && (
+                    <p>
+                      <strong>手機：</strong>
+                      {order.customer_phone}
+                    </p>
                   )}
                   <p><strong>預約日期：</strong>{formattedDate}</p>
                   <p><strong>時間：</strong>{order.booking_time.slice(0,5)}</p>   

@@ -15,8 +15,8 @@ function BookingClientContent() {
   const [inputError, setInputError] = useState("");
   const [mobileError, setMobileError] = useState("");
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const [name, setName] = useState(user?.client_name || "");
-  const [mobile, setMobile] = useState(user?.contact_mobile || "");
+  const [name, setName] = useState("");
+  const [mobile, setMobile] = useState("");
   const [note, setNote] = useState("");
   const [contactMail, setContactMail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,9 +56,14 @@ function BookingClientContent() {
     if (user && bookingData) {
       const services = bookingData.selectedServices.map(s => s.name);
       const addons = bookingData.selectedAddons.map(id => addonMap[id] || id);
-      setName(user.client_name || "");
-      setMobile(user.contact_mobile || "");
-  
+      if (user.role === "owner") {
+        setName("");
+        setMobile("");
+      } else {
+        setName(user.client_name || "");
+        setMobile(user.contact_mobile || "");
+      }
+
       setFormData({
         client_id: user.id,
         booking_detail: {
@@ -390,10 +395,12 @@ function BookingClientContent() {
                 type="text"
                 value={guestName}
                 onChange={(e) => {
-                  setGuestName(e.target.value);
-                  if (e.target.value.trim()) {
+                  const v = e.target.value;
+                  setGuestName(v);
+                  if (v.trim()) {
                     setSelectedCustomer(null);
                   }
+                  setName(v);
                   setCustomerError("");
                 }}
                 className="border p-2 rounded w-full"

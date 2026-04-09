@@ -466,8 +466,10 @@ def _bg_sync_confirm_booking_google_calendar(booking_id: int) -> None:
         )
         if not b or b.status != "confirmed":
             return
-        customer = db.query(User).filter(User.id == b.user_id).first()
-        if not customer:
+        customer = (
+            db.query(User).filter(User.id == b.user_id).first() if b.user_id else None
+        )
+        if customer is None and not (b.guest_name or "").strip():
             return
         try:
             if b.google_calendar_event_id:
@@ -492,8 +494,10 @@ def _bg_sync_complete_booking_google_calendar(booking_id: int) -> None:
         )
         if not b or b.status != "completed":
             return
-        customer = db.query(User).filter(User.id == b.user_id).first()
-        if not customer:
+        customer = (
+            db.query(User).filter(User.id == b.user_id).first() if b.user_id else None
+        )
+        if customer is None and not (b.guest_name or "").strip():
             return
         try:
             gcal.update_event_status(b.google_calendar_event_id, b, customer, "completed")
