@@ -1,7 +1,6 @@
 """Google / LINE OAuth：簽發與本地登入相同的 JWT cookie。"""
 from __future__ import annotations
 
-import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -11,7 +10,7 @@ from urllib.parse import quote, unquote, urlencode
 import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -168,27 +167,13 @@ def _decode_bind_token(token: str) -> dict:
     return payload
 
 
-def _finish_oauth_html(frontend_origin: str, redirect_path: str) -> HTMLResponse:
-    """popup：postMessage 給 opener；整頁：導回前端。"""
-    fo = json.dumps(frontend_origin)
-    rp = json.dumps(redirect_path)
-    body = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><title>登入完成</title></head>
-<body><script>
-(function() {{
-  var origin = {fo};
-  var path = {rp};
-  if (window.opener) {{
-    try {{
-      window.opener.postMessage("login-success", origin);
-    }} catch (e) {{}}
-    window.close();
-  }} else {{
-    window.location.href = origin + path;
-  }}
-}})();
-</script><p>登入完成，請關閉此視窗。</p></body></html>"""
-    return HTMLResponse(content=body)
+def _oauth_success_redirect(frontend_origin: str, redirect_path: str) -> RedirectResponse:
+    """OAuth 成功後統一用 302 導回前端，避免 WebView 對 opener/window.close 相容問題。"""
+    base = frontend_origin.rstrip("/")
+    path = redirect_path if redirect_path.startswith("/") else f"/{redirect_path}"
+    resp = RedirectResponse(url=f"{base}{path}", status_code=302)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 def _google_oauth_credentials() -> tuple[str, str]:
@@ -464,10 +449,9 @@ def create_oauth_router(
                 db.refresh(user)
 
             token = create_access_token(user.id)
-            html = _finish_oauth_html(fo, red)
-            html.headers["Cache-Control"] = "no-store"
-            set_auth_cookie(html, token)
-            return html
+            resp = _oauth_success_redirect(fo, red)
+            set_auth_cookie(resp, token)
+            return resp
         except OperationalError:
             return _oauth_db_unreachable_redirect(fo, red)
 
@@ -565,10 +549,9 @@ def create_oauth_router(
                 db.refresh(user)
 
             token = create_access_token(user.id)
-            html = _finish_oauth_html(fo, red)
-            html.headers["Cache-Control"] = "no-store"
-            set_auth_cookie(html, token)
-            return html
+            resp = _oauth_success_redirect(fo, red)
+            set_auth_cookie(resp, token)
+            return resp
         except OperationalError:
             return _oauth_db_unreachable_redirect(fo, red)
 

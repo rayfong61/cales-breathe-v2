@@ -252,12 +252,13 @@ def _allowed_origins() -> list[str]:
         "http://127.0.0.1:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://cales-breathe-v2-vite.vercel.app",
     ]
-    # 讓部署環境可透過環境變數動態追加（例如自訂網域）
+    # 正式環境由 FRONTEND_PUBLIC_ORIGIN 控制；支援單一或逗號分隔多個 origin。
     extra = os.getenv("FRONTEND_PUBLIC_ORIGIN", "").strip()
-    if extra and extra not in origins:
-        origins.append(extra)
+    if extra:
+        for origin in (x.strip().rstrip("/") for x in extra.split(",")):
+            if origin and origin not in origins:
+                origins.append(origin)
     return origins
 
 
