@@ -1431,6 +1431,8 @@ def legacy_cancel_order(
     background_tasks.add_task(_bg_delete_google_calendar_event, cal_event_id)
     if user.role != "owner":
         background_tasks.add_task(_bg_notify_owner_customer_cancelled, booking_id, user.id)
+    else:
+        background_tasks.add_task(_bg_notify_customer_owner_cancelled, booking_id)
 
     return {"message": "預約已取消"}
 
@@ -1789,6 +1791,26 @@ def _bg_notify_owner_customer_cancelled(booking_id: int, cancelled_by_user_id: i
         _notify_owner_customer_cancelled(b, actor)
 
 
+def _bg_notify_customer_owner_cancelled(booking_id: int) -> None:
+    """背景：業主取消後以新 Session 載入資料並通知客人 LINE。"""
+    with SessionLocal() as db:
+        b = (
+            db.query(Booking)
+            .options(joinedload(Booking.services))
+            .filter(Booking.id == booking_id)
+            .first()
+        )
+        if not b:
+            return
+        customer = db.query(User).filter(User.id == b.user_id).first()
+        if not customer or not customer.line_user_id:
+            return
+        access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+        if not access_token:
+            return
+        _bg_line_push_safe(access_token, customer.line_user_id, _booking_rejected_text(b))
+
+
 def _assert_can_cancel_booking(actor: User, booking: Booking) -> None:
     if actor.role == "owner" or actor.id == booking.user_id:
         return
@@ -1890,5 +1912,7 @@ def cancel_booking(
 
     if actor.role != "owner":
         background_tasks.add_task(_bg_notify_owner_customer_cancelled, booking_id, actor.id)
+    else:
+        background_tasks.add_task(_bg_notify_customer_owner_cancelled, booking_id)
 
     return _booking_to_read(b)

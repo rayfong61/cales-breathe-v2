@@ -290,6 +290,38 @@ def test_cancel_booking_allowed_before_24_hours(client, monkeypatch):
     assert cancel_resp.json()["status"] == "cancelled"
 
 
+def test_owner_cancel_booking_pushes_line_to_customer(client, monkeypatch):
+    """owner 透過 API 取消預約後，應推播取消通知給客人。"""
+    customer_line_id = "U_owner_cancel_target"
+    customer_id = _create_user(client, "owner-cancel-customer", line_user_id=customer_line_id)
+    owner_id = _create_user(client, "owner-cancel-owner", role="owner")
+    service_id = _get_service_ids_by_category(client, "手臂")[0]
+    when = datetime(2030, 2, 6, 10, 0, 0)
+
+    # 建立預約時先關閉 push，避免干擾驗證
+    monkeypatch.setattr(main_module, "_push_text_to_line_sync", lambda *a, **kw: None)
+    booking_id = _create_booking(client, customer_id, [service_id], when).json()["id"]
+
+    push_calls: list = []
+    monkeypatch.setattr(
+        main_module,
+        "_push_text_to_line_sync",
+        lambda access_token, user_id, text: push_calls.append((user_id, text)),
+    )
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "fake-token")
+
+    cancel_resp = client.post(
+        f"/bookings/{booking_id}/cancel",
+        json={"user_id": owner_id},
+    )
+    assert cancel_resp.status_code == 200
+    assert cancel_resp.json()["status"] == "cancelled"
+
+    assert any(uid == customer_line_id for uid, _ in push_calls), "應推播取消通知給客人"
+    cancelled_msg = next(t for uid, t in push_calls if uid == customer_line_id)
+    assert "已取消" in cancelled_msg
+
+
 def _force_confirm_booking(client, monkeypatch, owner_id: int, booking_id: int) -> dict:
     """測試用：monkeypatch JWT cookie auth 為 owner，呼叫 /confirm endpoint。
     
