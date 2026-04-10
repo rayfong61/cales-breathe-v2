@@ -97,3 +97,10 @@ class LineWebhookEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(String(120), unique=True, index=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class TestTable(Base):
+    __tablename__ = "test_table"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

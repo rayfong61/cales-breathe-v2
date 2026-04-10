@@ -7,7 +7,7 @@
 | 項目 | 路徑 |
 |------|------|
 | JWT／Cookie | [`cales-breathe-v2-api/app/main.py`](../cales-breathe-v2-api/app/main.py)（`JWT_COOKIE_NAME`、`JWT_TTL_DAYS`、`_create_access_token`、`_set_auth_cookie`） |
-| Google／LINE OAuth | [`cales-breathe-v2-api/app/oauth.py`](../cales-breathe-v2-api/app/oauth.py)（`line_callback`、`_finish_oauth_html`） |
+| Google／LINE OAuth | [`cales-breathe-v2-api/app/oauth.py`](../cales-breathe-v2-api/app/oauth.py)（`line_callback`、`_oauth_success_redirect`） |
 | 前端登入導向 | [`cales-breathe-v2-vite/src/pages/Login.jsx`](../cales-breathe-v2-vite/src/pages/Login.jsx)、[`Booking-step3.jsx`](../cales-breathe-v2-vite/src/pages/Booking-step3.jsx) |
 | DB 初始化 | [`cales-breathe-v2-api/app/database.py`](../cales-breathe-v2-api/app/database.py)（`create_all`） |
 | Alembic 說明（筆記） | [`cales-breathe-v2-api/docs/Postgres筆記.md`](../cales-breathe-v2-api/docs/Postgres筆記.md) |
@@ -43,8 +43,8 @@
 
 ### 2.1 可能原因（依常見度）
 
-1. **OAuth 完成頁為 HTML + `window.opener`／`postMessage`／`window.close()`**  
-   Android（含 LINE 內建瀏覽器／部分 WebView）常出現 opener 不可用或無法關閉視窗，使用者**卡在「登入完成」頁**，誤以為登入失敗。成功路徑目前見 `_finish_oauth_html`。
+1. **OAuth 完成頁依賴前端 JS 機制（歷史作法）**  
+   Android（含 LINE 內建瀏覽器／部分 WebView）常出現 opener 不可用、`window.close()` 受限，造成使用者卡頁或狀態不同步。現已改為後端成功回應直接 `302` 導回前端（`_oauth_success_redirect`），降低相容性風險。
 2. **前端與 API 不同站**  
    跨站請求需帶 cookie 時，生產環境通常需 **`Secure` + `SameSite=None`**；若設定與實際網址不符，可能出現平台差異。見 `COOKIE_SECURE`、`COOKIE_SAMESITE` 與 CORS `allow_credentials`。
 3. **LINE Developers Callback URL**  
@@ -97,3 +97,40 @@
 - 本機與雲端總覽：[`docs/本地與雲端部署.md`](本地與雲端部署.md)
 - Cloud Run／環境變數：[`docs/cloud run筆記.md`](cloud%20run筆記.md)
 - Docker 本機整合：[`docs/DOCKER_DEVELOPMENT_PLAN.md`](DOCKER_DEVELOPMENT_PLAN.md)
+
+---
+
+## 6. 上線驗證 Checklist（5 分鐘）
+
+### 6.1 部署前（環境變數）
+
+- [ ] `FRONTEND_PUBLIC_ORIGIN=https://cales-breathe-v2.vercel.app`（或逗號分隔多個前端網域）
+- [ ] `COOKIE_SECURE=true`
+- [ ] `COOKIE_SAMESITE=none`
+- [ ] `API_PUBLIC_BASE_URL` 與實際 API 外部網址一致（含 `/api` 規劃）
+- [ ] LINE Developers callback URL = `{API_PUBLIC_BASE_URL}/auth/line/callback`
+
+### 6.2 部署後（Android 實機）
+
+- [ ] Android Chrome（一般分頁）可完成 LINE 登入並回到前端頁
+- [ ] Android LINE 內建瀏覽器可完成 LINE 登入並回到前端頁
+- [ ] callback 成功請求為 `302`，response 含 `Set-Cookie: cb_access_token`
+- [ ] 回前端後呼叫需登入 API 時，request 有帶 cookie（非 401）
+- [ ] 失敗情境會回前端並帶 `oauth_error`（非卡在 callback 空白頁）
+
+---
+
+## 7. Alembic 快速開始（已可執行）
+
+> 目前可先獨立推進 Alembic，Android LINE 登入問題後續再處理。
+
+1. 安裝依賴（API 專案根目錄）
+   - `pip install -r requirements.txt`
+2. 套用 baseline
+   - `alembic upgrade head`
+3. 日常新增 schema 變更
+   - 調整 `app/models.py`
+   - `alembic revision --autogenerate -m "your message"`
+   - 檢查 `alembic/versions/*.py` 後再 `alembic upgrade head`
+4. 若 Supabase 既有資料庫要先對齊版本（不重建）
+   - `alembic stamp 20260409_000001`

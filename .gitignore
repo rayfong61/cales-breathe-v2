@@ -56,6 +56,10 @@ Thumbs.db
 cales-breathe-v2-api/uploads/
 cales-breathe-v2-api/app.db
 
+# --- Local reference materials ---
+參考/
+
 # --- Git metadata accidentally created inside subfolders ---
 **/.git/
+
 

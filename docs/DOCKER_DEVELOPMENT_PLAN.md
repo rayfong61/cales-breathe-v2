@@ -2,7 +2,7 @@
 
 > **總覽**：本機與雲端部署對照請先讀 [`本地與雲端部署.md`](本地與雲端部署.md)。
 
-本文件描述 monorepo 內以 **Docker Compose** 進行本機整合測試、以及後續銜接 **GCP VM** 的開發路線；實作細節以根目錄 [`README.md`](../README.md)、[`docker-compose.yml`](../docker-compose.yml) 為準。
+本文件描述 monorepo 內以 **Docker Compose** 進行**本機整合測試**之主線。正式環境為 **Vercel ＋ Cloud Run ＋ Supabase**（見 [`本地與雲端部署.md`](本地與雲端部署.md)）；曾規劃以 **GCP VM** 承載與 compose 類似之單機架構，**已取消**。實作細節以根目錄 [`README.md`](../README.md)、[`docker-compose.yml`](../docker-compose.yml) 為準。
 
 ---
 
@@ -12,7 +12,7 @@
 |------|------|
 | **A. 本機 Docker** | 單一指令啟動 **Postgres、FastAPI、`cales-breathe-v2-vite` 前端（Vite 產物）、NGINX 閘道**；閘道於 `/` 提供 SPA、`/api/` 反代至後端，瀏覽器可驗證主要流程。 |
 | **B. 本機 OAuth／Bot** | Google／LINE Login 以登記之 callback 測通；LINE Messaging Webhook 以 **HTTPS 隧道**（如 ngrok）測通。 |
-| **C. 正式佈署** | 同一套 compose 概念遷至 GCP VM（或抽換為 production 設定）：網域、HTTPS、備份。 |
+| **C. 正式佈署** | **已採用** Vercel（前端）＋ Cloud Run（API）＋ Supabase（DB），見 [`本地與雲端部署.md`](本地與雲端部署.md)。**未採用** 將 compose 整包遷至 GCP VM 之路線。 |
 
 ---
 
@@ -136,14 +136,16 @@ LINE 需 **HTTPS 公網**；本機請使用 **ngrok**、**Cloudflare Tunnel** �
 
 ---
 
-## 8. 後續：GCP VM（概要）
+## 8. 歷史備考：GCP VM 方案（已取消）
+
+> **現況**：正式環境改採 **Cloud Run + Vercel + Supabase**，不再以單一 GCP VM 跑 compose。
+
+以下為當初評估 VM 時之備忘（僅供對照，**非目前路線**）：
 
 - VM 安裝 Docker 與 Compose；上傳 monorepo 或部署產物。
 - 防火牆開放 80／443；網域 DNS 指向 VM；憑證（如 Let’s Encrypt）。
 - 正式環境：`COOKIE_SECURE=true`、正確之 `FRONTEND_PUBLIC_ORIGIN` / `API_PUBLIC_BASE_URL`。
 - **e2-micro（1 GB）**：可當實驗；同機跑 Postgres 建議預留 **swap** 或升級機型；資源限制與 Postgres `max_connections` 須與後端連線池一併檢視。
-
-詳細步驟可另見 `cales-breathe-v2-api/docs` 內既有佈署筆記（若與本計畫衝突，**以本 monorepo 根目錄 compose 為準**）。
 
 ---
 

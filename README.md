@@ -1,7 +1,8 @@
-# cales-breathe-v2（本機 Docker）
+# cales-breathe-v2
 
-**本機與雲端部署總覽**見 **[docs/本地與雲端部署.md](docs/本地與雲端部署.md)**。  
-本機 Docker 的完整路線與檢查清單見 **[docs/DOCKER_DEVELOPMENT_PLAN.md](docs/DOCKER_DEVELOPMENT_PLAN.md)**。
+**正式部署**：**Vercel**（前端 SPA）＋ **Google Cloud Run**（FastAPI）＋ **Supabase**（PostgreSQL）。細節見 **[docs/本地與雲端部署.md](docs/本地與雲端部署.md)**、[docs/cloud run筆記.md](docs/cloud%20run筆記.md)。
+
+**本機整合測試**：**Docker Compose**（Postgres + API + NGINX gateway），完整路線見 **[docs/DOCKER_DEVELOPMENT_PLAN.md](docs/DOCKER_DEVELOPMENT_PLAN.md)**。曾評估以 GCP VM 自架與 compose 類似架構，已不採用。
 
 目錄：
 
