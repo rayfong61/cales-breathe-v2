@@ -18,3 +18,4 @@ uvicorn app.main:app --reload
 - **開發規格書（階段驗收、API 現況）**：[docs/SPECIFICATION.md](./docs/SPECIFICATION.md)
 - **面試目標規格書（MVP、商業規則決策、Demo）**：[docs/SPEC_INTERVIEW_V1.md](./docs/SPEC_INTERVIEW_V1.md)
 - **文件清單與 Git 版本控制建議**：[docs/PROJECT_DOCS_AND_GIT.md](./docs/PROJECT_DOCS_AND_GIT.md)
+- **資料庫遷移（Alembic）**：[`alembic/`](./alembic/)（`env.py` 對齊 `app.database`／`app.models`）；指令見 monorepo [docs/Alembic筆記.md](../docs/Alembic筆記.md)
