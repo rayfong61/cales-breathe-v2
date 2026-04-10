@@ -2,21 +2,34 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 import app.main as main_module
+from app.models import User
+
+
+def _auth_cookies(user_id: int) -> dict[str, str]:
+    token = main_module._create_access_token(user_id)
+    return {main_module.JWT_COOKIE_NAME: token}
 
 
 def _create_user(client, name: str, role: str = "customer", line_user_id: str | None = None) -> int:
-    phone = f"09{uuid4().int % 100000000:08d}"
-    response = client.post(
-        "/users",
-        json={
-            "name": name,
-            "line_user_id": line_user_id or f"{name}-line-id",
-            "phone": phone,
-            "role": role,
-        },
-    )
-    assert response.status_code == 200
-    return response.json()["id"]
+    db = main_module.SessionLocal()
+    try:
+        phone = f"09{uuid4().int % 100000000:08d}"
+        uid_line = line_user_id or f"{name}-line-id"
+        mail = f"{uuid4().hex[:12]}@pytest.example.com"
+        u = User(
+            name=name,
+            phone=phone,
+            line_user_id=uid_line,
+            role=role,
+            contact_mail=mail,
+            provider="local",
+        )
+        db.add(u)
+        db.commit()
+        db.refresh(u)
+        return u.id
+    finally:
+        db.close()
 
 
 def _get_service_ids_by_category(client, category: str) -> list[int]:
@@ -27,23 +40,31 @@ def _get_service_ids_by_category(client, category: str) -> list[int]:
 
 def _create_booking(
     client,
-    user_id: int,
+    actor_user_id: int,
     service_ids: list[int],
     when: datetime,
+    *,
+    target_user_id: int | None = None,
     add_by_owner: int | None = None,
 ):
     payload = {
-        "user_id": user_id,
         "service_ids": service_ids,
         "booking_date": when.isoformat(),
         "notes": "pytest booking",
     }
     if add_by_owner is not None:
         payload["add_by_owner"] = add_by_owner
+        if target_user_id is not None:
+            payload["user_id"] = target_user_id
+    elif target_user_id is not None:
+        payload["user_id"] = target_user_id
+    else:
+        payload["user_id"] = actor_user_id
 
     return client.post(
         "/bookings",
         json=payload,
+        cookies=_auth_cookies(actor_user_id),
     )
 
 
@@ -61,11 +82,11 @@ def test_create_user_and_booking_success(client, monkeypatch):
     assert booking["status"] == "pending"
     assert len(booking["services"]) == 1
 
-    list_resp = client.get("/bookings")
+    list_resp = client.get("/bookings", cookies=_auth_cookies(user_id))
     assert list_resp.status_code == 200
     assert len(list_resp.json()) == 1
 
-    get_resp = client.get(f"/bookings/{booking['id']}")
+    get_resp = client.get(f"/bookings/{booking['id']}", cookies=_auth_cookies(user_id))
     assert get_resp.status_code == 200
     assert get_resp.json()["id"] == booking["id"]
 
@@ -163,9 +184,10 @@ def test_owner_can_create_booking_for_customer(client, monkeypatch):
 
     response = _create_booking(
         client,
-        customer_id,
+        owner_id,
         [arm_service_id],
         when,
+        target_user_id=customer_id,
         add_by_owner=owner_id,
     )
 
@@ -185,9 +207,10 @@ def test_non_owner_cannot_create_booking_for_other_customer(client, monkeypatch)
 
     response = _create_booking(
         client,
-        target_customer_id,
+        non_owner_id,
         [arm_service_id],
         when,
+        target_user_id=target_customer_id,
         add_by_owner=non_owner_id,
     )
 
@@ -209,18 +232,18 @@ def test_cancel_booking_permissions_and_not_found(client, monkeypatch):
 
     forbidden_resp = client.post(
         f"/bookings/{booking_id}/cancel",
-        json={"user_id": customer2_id},
+        cookies=_auth_cookies(customer2_id),
     )
     assert forbidden_resp.status_code == 403
 
     owner_cancel_resp = client.post(
         f"/bookings/{booking_id}/cancel",
-        json={"user_id": owner_id},
+        cookies=_auth_cookies(owner_id),
     )
     assert owner_cancel_resp.status_code == 200
     assert owner_cancel_resp.json()["status"] == "cancelled"
 
-    not_found_resp = client.post("/bookings/999999/cancel", json={"user_id": owner_id})
+    not_found_resp = client.post("/bookings/999999/cancel", cookies=_auth_cookies(owner_id))
     assert not_found_resp.status_code == 404
     assert not_found_resp.json()["detail"] == "預約不存在"
 
@@ -239,7 +262,7 @@ def test_cancel_pending_booking_no_time_restriction(client, monkeypatch):
 
     cancel_resp = client.post(
         f"/bookings/{booking_id}/cancel",
-        json={"user_id": customer_id},
+        cookies=_auth_cookies(customer_id),
     )
     assert cancel_resp.status_code == 200
     assert cancel_resp.json()["status"] == "cancelled"
@@ -263,7 +286,7 @@ def test_cancel_booking_rejected_within_24_hours(client, monkeypatch):
 
     cancel_resp = client.post(
         f"/bookings/{booking_id}/cancel",
-        json={"user_id": customer_id},
+        cookies=_auth_cookies(customer_id),
     )
     assert cancel_resp.status_code == 400
     assert cancel_resp.json()["detail"] == "開約前 24 小時內不可取消"
@@ -284,7 +307,7 @@ def test_cancel_booking_allowed_before_24_hours(client, monkeypatch):
 
     cancel_resp = client.post(
         f"/bookings/{booking_id}/cancel",
-        json={"user_id": customer_id},
+        cookies=_auth_cookies(customer_id),
     )
     assert cancel_resp.status_code == 200
     assert cancel_resp.json()["status"] == "cancelled"
@@ -312,7 +335,7 @@ def test_owner_cancel_booking_pushes_line_to_customer(client, monkeypatch):
 
     cancel_resp = client.post(
         f"/bookings/{booking_id}/cancel",
-        json={"user_id": owner_id},
+        cookies=_auth_cookies(owner_id),
     )
     assert cancel_resp.status_code == 200
     assert cancel_resp.json()["status"] == "cancelled"
@@ -429,7 +452,10 @@ def test_confirm_already_confirmed_rejected(client, monkeypatch):
     booking_id = _create_booking(client, customer_id, [service_id], when).json()["id"]
     _force_confirm_booking(client, monkeypatch, owner_id, booking_id)
 
-    resp = client.post(f"/bookings/{booking_id}/confirm")
+    resp = client.post(
+        f"/bookings/{booking_id}/confirm",
+        cookies=_auth_cookies(owner_id),
+    )
     assert resp.status_code == 400
     assert "已是確認狀態" in resp.json()["detail"]
 
@@ -449,35 +475,48 @@ def test_list_bookings_includes_pending(client, monkeypatch):
 
     _force_confirm_booking(client, monkeypatch, owner_id, b1_id)
 
-    all_resp = client.get("/bookings")
+    all_resp = client.get("/bookings", cookies=_auth_cookies(owner_id))
     statuses = {b["id"]: b["status"] for b in all_resp.json()}
     assert statuses[b1_id] == "confirmed"
     assert statuses[b2_id] == "pending"
 
-    confirmed_only = client.get("/bookings?status=confirmed")
+    confirmed_only = client.get("/bookings?status=confirmed", cookies=_auth_cookies(owner_id))
     assert all(b["status"] == "confirmed" for b in confirmed_only.json())
 
-    pending_only = client.get("/bookings?status=pending")
+    pending_only = client.get("/bookings?status=pending", cookies=_auth_cookies(owner_id))
     assert all(b["status"] == "pending" for b in pending_only.json())
 
 
-def test_create_user_duplicate_phone_rejected(client):
-    payload_1 = {
-        "name": "same-phone-1",
-        "line_user_id": "same-phone-line-1",
-        "phone": "0911111111",
-        "role": "customer",
-    }
-    payload_2 = {
-        "name": "same-phone-2",
-        "line_user_id": "same-phone-line-2",
-        "phone": "0911111111",
-        "role": "customer",
-    }
+def test_duplicate_phone_rejected_at_database(client):
+    """users.phone unique：第二筆同號應無法 commit。"""
+    from sqlalchemy.exc import IntegrityError
 
-    first = client.post("/users", json=payload_1)
-    assert first.status_code == 200
-
-    second = client.post("/users", json=payload_2)
-    assert second.status_code == 409
-    assert second.json()["detail"] == "手機號碼已存在"
+    db = main_module.SessionLocal()
+    try:
+        u1 = User(
+            name="same-phone-1",
+            phone="0911111111",
+            line_user_id="same-phone-line-1",
+            contact_mail="a1@pytest.example.com",
+            role="customer",
+            provider="local",
+        )
+        u2 = User(
+            name="same-phone-2",
+            phone="0911111111",
+            line_user_id="same-phone-line-2",
+            contact_mail="a2@pytest.example.com",
+            role="customer",
+            provider="local",
+        )
+        db.add(u1)
+        db.commit()
+        db.add(u2)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        else:
+            raise AssertionError("expected IntegrityError for duplicate phone")
+    finally:
+        db.close()

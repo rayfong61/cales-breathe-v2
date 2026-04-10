@@ -47,20 +47,19 @@
 | GET | `/health` | 健康檢查；回傳含 `db` 識別（目前為 sqlite） |
 | GET | `/services` | 列出服務；依 `CATEGORY_ORDER` 與 `sort_order` 排序 |
 | GET | `/services/by-category` | 依分類分組（供 LINE 選單）；分類順序同 `CATEGORY_ORDER` |
-| POST | `/users` | 建立使用者（`UserCreate`） |
 | POST | `/bookings` | 建立預約（`BookingCreate`） |
-| GET | `/bookings` | 查詢預約；Query `date=YYYY-MM-DD` 可選；**僅 `status=confirmed`** |
+| GET | `/bookings` | 查詢預約；需登入 Cookie；Query `date=YYYY-MM-DD` 可選 |
 | GET | `/bookings/{booking_id}` | 單筆預約（不限狀態，找不到 404） |
-| POST | `/bookings/{booking_id}/cancel` | 取消預約（`BookingCancel`，內含 `user_id`）；軟刪除為 `cancelled` |
+| POST | `/bookings/{booking_id}/cancel` | 取消預約（需登入 Cookie）；軟刪除為 `cancelled` |
 
 ### 3.3 商業規則（必須維持向後相容，除非另有版本計畫）
 
 1. **服務選擇**：`service_ids` 至少一筆；同一 **category** 至多選一項，否則 HTTP **400**。
 2. **服務存在性**：任一所選 id 不存在 → **404**（訊息：部分服務不存在）。
-3. **時段衝突**：僅與 `status=confirmed` 的預約比對；區間重疊則 **409**（該時段已被預約）。  
+3. **時段衝突**：與 `status in (pending, confirmed)` 的預約比對；區間重疊則 **409**（該時段已被預約）。  
    - 重疊定義：`new_start < existing_end && existing_start < new_end`（與程式一致）。
    - **時間粒度**：預約開始時間需落在 30 分鐘格線（`HH:00` 或 `HH:30`），否則 **400**。
-4. **取消**：操作者為預約之 `user_id` 或 `role=owner`，否則 **403**；已取消 idempotent 回傳；非 `confirmed` 不可取消 → **400**。  
+4. **取消**：操作者由登入 Cookie 判定；需為預約之 `user_id` 或 `role=owner`，否則 **403**；已取消 idempotent 回傳；非 `confirmed` 不可取消 → **400**。  
    - **時間窗限制**：預約開始前 24 小時內不可取消 → **400**（訊息：開約前 24 小時內不可取消）。
 
 ### 3.4 資料模型摘要（實作以程式為準）
@@ -74,7 +73,7 @@
 
 - 衝突檢查：目前載入全部 `confirmed` 後於 Python 迴圈比對 → **階段 E** 改為 DB 區間查詢（必要時併發策略）。
 - 無 Alembic、無 pytest、無 CI：依階段 B、D、J。
-- 建立/取消預約、建立使用者：**尚未**導入認證（**階段 F**）。
+- `/bookings` 系列已改為需登入 Cookie；其餘公開範圍仍需持續收斂（**階段 F/J**）。
 
 ---
 
@@ -192,7 +191,7 @@ NOTES 底部「選項 A / B / C」：對應 **B / G / C**（細節以本檔階�
 ## 8. 待決議事項（TBD）
 
 - [ ] 生產環境是否關閉 `/docs` 或加保護（階段 J）
-- [ ] `POST /users`、`POST /bookings` 在導入 LINE/JWT 後的公開範圍
+- [ ] 正式環境 `/docs`、`openapi.json` 是否關閉或需登入保護
 - [ ] 行事曆與 DB 不一致時的補償流程（階段 H）
 
 ---

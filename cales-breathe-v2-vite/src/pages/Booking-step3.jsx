@@ -26,6 +26,7 @@ function BookingClientContent() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [guestName, setGuestName] = useState("");
   const [customerError, setCustomerError] = useState("");
+  const [serviceCatalog, setServiceCatalog] = useState([]);
 
   // 取得 localStorage 的預約資料
   useEffect(() => {
@@ -84,6 +85,18 @@ function BookingClientContent() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [isSubmitted]);
 
+  useEffect(() => {
+    const fetchServices = async () => {
+      try {
+        const res = await axios.get(`${api}/services`);
+        setServiceCatalog(Array.isArray(res.data) ? res.data : []);
+      } catch (err) {
+        console.error("取得服務清單失敗", err);
+      }
+    };
+    fetchServices();
+  }, [api]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData) return;
@@ -98,9 +111,23 @@ function BookingClientContent() {
     }
 
     // 若為 owner，需檢查是否有選擇會員或輸入訪客姓名（擇一）
-    let payload = { ...formData };
+    let payload = {};
     const trimmedName = name.trim();
     const trimmedMobile = mobile.trim();
+    const serviceNames = [
+      ...(formData.booking_detail?.services || []),
+      ...(formData.booking_detail?.addons || []),
+    ];
+    const uniqueNames = [...new Set(serviceNames)];
+    const nameToService = new Map(serviceCatalog.map((s) => [s.name, s.id]));
+    const missingNames = uniqueNames.filter((n) => !nameToService.has(n));
+    if (missingNames.length > 0) {
+      setMessage(`預約失敗：找不到服務項目（${missingNames.join("、")}）`);
+      return;
+    }
+    const service_ids = uniqueNames.map((n) => nameToService.get(n));
+    const booking_date = `${formData.booking_date}T${formData.booking_time}:00`;
+
     if (user?.role === "owner") {
       const trimmedGuest = guestName.trim();
       if (!selectedCustomer && !trimmedGuest) {
@@ -108,16 +135,30 @@ function BookingClientContent() {
         return;
       }
       if (selectedCustomer) {
-        payload.client_id = selectedCustomer.id;
-        payload.guest_name = null;
-        payload.customer_name = trimmedName;
-        payload.customer_mobile = trimmedMobile;
+        payload = {
+          user_id: selectedCustomer.id,
+          add_by_owner: user.id,
+          service_ids,
+          booking_date,
+          notes: note.trim() || null,
+        };
       } else {
-        payload.client_id = null;
-        payload.guest_name = trimmedGuest;
-        payload.customer_name = trimmedName;
-        payload.customer_mobile = trimmedMobile;
+        payload = {
+          add_by_owner: user.id,
+          guest_name: trimmedGuest,
+          guest_phone: trimmedMobile,
+          service_ids,
+          booking_date,
+          notes: note.trim() || null,
+        };
       }
+    } else {
+      payload = {
+        user_id: user.id,
+        service_ids,
+        booking_date,
+        notes: note.trim() || null,
+      };
     }
 
     try {
@@ -131,11 +172,7 @@ function BookingClientContent() {
       }
 
       // 2. 提交預約資料
-      const res = await axios.post(`${api}/orders`, {
-        ...payload,
-        booking_detail: JSON.stringify(payload.booking_detail),
-        booking_note: note.trim() || null
-      }, { withCredentials: true });
+      await axios.post(`${api}/bookings`, payload, { withCredentials: true });
 
       setIsSubmitted(true);
       localStorage.removeItem("bookingData");

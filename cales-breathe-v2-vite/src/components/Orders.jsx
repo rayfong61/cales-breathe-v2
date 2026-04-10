@@ -19,11 +19,49 @@ function Orders() {
     }
   });
 
+  const formatBookingDate = (bookingDateIso) => {
+    const dt = new Date(bookingDateIso);
+    return dt.toLocaleDateString("zh-TW", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  };
+
+  const formatBookingTime = (bookingDateIso) => {
+    const dt = new Date(bookingDateIso);
+    return dt.toTimeString().slice(0, 5);
+  };
+
+  const toLegacyLikeOrder = (b) => {
+    const services = (b.services || []).filter((s) => !String(s.category).startsWith("addon-"));
+    const addons = (b.services || []).filter((s) => String(s.category).startsWith("addon-"));
+    return {
+      id: b.id,
+      user_id: b.user_id,
+      booking_date: b.booking_date,
+      booking_time: formatBookingTime(b.booking_date),
+      total_price: b.total_price,
+      total_duration: b.total_duration_minutes,
+      booking_note: b.notes,
+      is_cancelled: b.status === "cancelled",
+      status: b.status,
+      booking_detail: {
+        services: services.map((s) => s.name),
+        addons: addons.map((s) => s.name),
+      },
+      guest_name: b.guest_name,
+      customer_name: b.customer_name || b.guest_name || `會員 #${b.user_id ?? "-"}`,
+      customer_phone: b.customer_phone || b.guest_phone,
+      customer_photo: b.customer_photo || null,
+    };
+  };
+
   const handleCancel = async (id) => {
     if (!window.confirm("確定要取消這筆預約嗎？")) return;
   
     try {
-      await axios.put(`${api}/orders/cancel/${id}`, {}, { withCredentials: true });
+      await axios.post(`${api}/bookings/${id}/cancel`, {}, { withCredentials: true });
       const cancelledAt = new Date().toISOString();
       // 不直接移除，改為標記已取消，保留歷史紀錄更符合帳務/預約情境
       setOrders((prev) =>
@@ -54,12 +92,8 @@ function Orders() {
 
     const fetchOrders = async () => {
       try {
-        const endpoint = user?.role === "owner" ? `${api}/owner/orders` : `${api}/orders`;
-        const reqConfig = user?.role === "owner"
-          ? { withCredentials: true }
-          : { params: { client_id: user.id }, withCredentials: true };
-        const res = await axios.get(endpoint, reqConfig);
-        setOrders(res.data);
+        const res = await axios.get(`${api}/bookings`, { withCredentials: true });
+        setOrders((res.data || []).map(toLegacyLikeOrder));
         // console.log(res.data);
       } catch (err) {
         setErrorMsg("無法取得預約紀錄");
@@ -88,8 +122,8 @@ function Orders() {
       if (a.is_cancelled !== b.is_cancelled) {
         return a.is_cancelled ? 1 : -1; // 已取消永遠排在最下方
       }
-      const aMs = new Date(`${a.booking_date}T${a.booking_time}`).getTime();
-      const bMs = new Date(`${b.booking_date}T${b.booking_time}`).getTime();
+      const aMs = new Date(a.booking_date).getTime();
+      const bMs = new Date(b.booking_date).getTime();
       return bMs - aMs;
     });
   
@@ -103,14 +137,9 @@ function Orders() {
         <ul>
           {visibleOrders.map((order) => {
             
-            const date = new Date(order.booking_date);
-            const formattedDate = date.toLocaleDateString("zh-TW", {
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit"
-            });
+            const formattedDate = formatBookingDate(order.booking_date);
             const detail = order.booking_detail;
-            const bookingDateTime = new Date(`${order.booking_date}T${order.booking_time}`);
+            const bookingDateTime = new Date(order.booking_date);
             const canCancel = user?.role === "owner"
               ? !order.is_cancelled
               : bookingDateTime >= new Date() && !order.is_cancelled;
@@ -152,9 +181,9 @@ function Orders() {
                         <p className="text-lg font-semibold text-gray-900 leading-tight truncate">
                           {order.customer_name || "訪客"}
                         </p>
-                        {order.customer_id != null && (
+                        {order.user_id != null && (
                           <p className="text-xs text-gray-500 mt-0.5">
-                            客人 · ID：{order.customer_id}
+                            客人 · ID：{order.user_id}
                           </p>
                         )}
                       </div>

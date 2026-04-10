@@ -17,6 +17,7 @@ from app.models import Service
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("JWT_SECRET", "pytest-jwt-secret-key-for-testing!!")
     db_file = tmp_path / "test.db"
     engine = create_engine(
         f"sqlite:///{db_file.as_posix()}",

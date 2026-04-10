@@ -43,10 +43,8 @@ from app.models import User, Service, Booking, LineWebhookEvent, booking_service
 from app import google_calendar as gcal
 from app.schemas import (
     ServiceRead,
-    UserCreate,
     UserRead,
     BookingCreate,
-    BookingCancel,
     BookingRead,
     LegacyLoginRequest,
     LegacyLoginResponse,
@@ -866,26 +864,6 @@ def list_services_by_category(db: Session = Depends(get_db)):
     return {k: grouped[k] for k in CATEGORY_ORDER if k in grouped}
 
 
-@app.post("/users", response_model=UserRead)
-def create_user(data: UserCreate, db: Session = Depends(get_db)):
-    """建立使用者（客人或業主）"""
-    user = User(**data.model_dump())
-    db.add(user)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        if "users.phone" in str(exc.orig):
-            raise HTTPException(409, "手機號碼已存在") from exc
-        if "users.contact_mail" in str(exc.orig):
-            raise HTTPException(409, "Email 已存在") from exc
-        if "users.line_user_id" in str(exc.orig):
-            raise HTTPException(409, "LINE 使用者已存在") from exc
-        raise
-    db.refresh(user)
-    return user
-
-
 # ----------------------------
 # Legacy/BFF adaptor endpoints
 # ----------------------------
@@ -1319,7 +1297,7 @@ def legacy_create_order(
         notes=notes,
     )
     try:
-        created = create_booking(
+        created = _create_booking_core(
             booking_create,
             background_tasks=background_tasks,
             db=db,
@@ -1459,17 +1437,33 @@ def _assert_booking_not_in_past(booking_date: datetime) -> None:
         raise HTTPException(400, "不可預約過去時間")
 
 
-@app.post("/bookings", response_model=BookingRead)
-def create_booking(
+def _booking_create_authorized(actor: User, data: BookingCreate) -> BookingCreate:
+    """依登入者解析預約主體；禁止客戶端偽造他人身分。"""
+    if data.add_by_owner is not None:
+        if actor.id != data.add_by_owner or actor.role != "owner":
+            raise HTTPException(403, "僅限 owner 可替他人建立預約")
+        return data
+    if data.guest_name:
+        raise HTTPException(403, "訪客預約僅限店家操作")
+    if data.user_id is not None and data.user_id != actor.id:
+        raise HTTPException(403, "僅能為本人建立預約")
+    return BookingCreate(
+        user_id=actor.id,
+        add_by_owner=None,
+        guest_name=None,
+        guest_phone=None,
+        service_ids=data.service_ids,
+        booking_date=data.booking_date,
+        notes=data.notes,
+    )
+
+
+def _create_booking_core(
     data: BookingCreate,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-):
-    """建立預約（支援多服務），檢查 X選1 與時段衝突。
-
-    - 一般客人：帶 user_id，自行預約。
-    - 業主代客：add_by_owner 為 owner id，可搭配 user_id（會員客人）或 guest_name（訪客）。
-    """
+    db: Session,
+) -> BookingRead:
+    """建立預約（核心邏輯）。呼叫前須已完成身分授權。"""
     target_user = None
     if data.user_id is not None:
         target_user = db.query(User).filter(User.id == data.user_id).first()
@@ -1546,6 +1540,19 @@ def create_booking(
         )
 
     return _booking_to_read(booking)
+
+
+@app.post("/bookings", response_model=BookingRead)
+def create_booking(
+    data: BookingCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """建立預約（需登入 Cookie）。客人僅能替自己預約；業主可代客（`add_by_owner` 須為本人且 role=owner）。"""
+    actor = _get_current_user_from_cookie(request, db)
+    resolved = _booking_create_authorized(actor, data)
+    return _create_booking_core(resolved, background_tasks, db)
 
 
 def _do_confirm_booking(booking_id: int, db: Session) -> Booking:
@@ -1817,6 +1824,15 @@ def _assert_can_cancel_booking(actor: User, booking: Booking) -> None:
     raise HTTPException(403, "僅限預約本人或店家可取消")
 
 
+def _assert_can_read_booking(actor: User, booking: Booking) -> None:
+    """預約詳情：業主可看全部；客人僅能看 user_id 為本人的預約（訪客單僅業主可讀）。"""
+    if actor.role == "owner":
+        return
+    if booking.user_id is not None and booking.user_id == actor.id:
+        return
+    raise HTTPException(403, "無權限")
+
+
 def _assert_cancel_time_window(booking: Booking) -> None:
     """預約開始前 24 小時內不可取消。"""
     if datetime.now() >= booking.booking_date - timedelta(hours=24):
@@ -1825,9 +1841,20 @@ def _assert_cancel_time_window(booking: Booking) -> None:
 
 def _booking_to_read(booking: Booking) -> BookingRead:
     """將 Booking model 轉成 BookingRead（含 services）"""
+    customer_name = booking.guest_name
+    customer_phone = booking.guest_phone
+    customer_photo = None
+    if booking.user is not None:
+        customer_name = booking.user.name
+        customer_phone = booking.user.phone
+        customer_photo = booking.user.photo
+
     return BookingRead(
         id=booking.id,
         user_id=booking.user_id,
+        customer_name=customer_name,
+        customer_phone=customer_phone,
+        customer_photo=customer_photo,
         booking_date=booking.booking_date,
         total_duration_minutes=booking.total_duration_minutes,
         total_price=booking.total_price,
@@ -1844,12 +1871,14 @@ def _booking_to_read(booking: Booking) -> BookingRead:
 
 @app.get("/bookings", response_model=list[BookingRead])
 def list_bookings(
+    request: Request,
     date_filter: date | None = Query(None, alias="date"),
     status: str | None = Query(None, description="篩選狀態（pending/confirmed/cancelled/completed），不填則顯示 pending+confirmed"),
     db: Session = Depends(get_db),
 ):
-    """查詢預約：可依日期與狀態篩選，預設顯示待審核與已確認預約"""
-    q = db.query(Booking).options(joinedload(Booking.services))
+    """查詢預約（需登入）：可依日期與狀態篩選；業主可看全部，客人僅看自己。"""
+    actor = _get_current_user_from_cookie(request, db)
+    q = db.query(Booking).options(joinedload(Booking.services), joinedload(Booking.user))
     if status:
         q = q.filter(Booking.status == status)
     else:
@@ -1858,38 +1887,40 @@ def list_bookings(
         start = datetime.combine(date_filter, datetime.min.time())
         end = start + timedelta(days=1)
         q = q.filter(Booking.booking_date >= start, Booking.booking_date < end)
+    if actor.role != "owner":
+        q = q.filter(Booking.user_id == actor.id)
     bookings = q.order_by(Booking.booking_date).all()
     return [_booking_to_read(b) for b in bookings]
 
 
 @app.get("/bookings/{booking_id}", response_model=BookingRead)
-def get_booking(booking_id: int, db: Session = Depends(get_db)):
-    """取得單一預約"""
+def get_booking(booking_id: int, request: Request, db: Session = Depends(get_db)):
+    """取得單一預約（需登入）"""
+    actor = _get_current_user_from_cookie(request, db)
     b = (
         db.query(Booking)
-        .options(joinedload(Booking.services))
+        .options(joinedload(Booking.services), joinedload(Booking.user))
         .filter(Booking.id == booking_id)
         .first()
     )
     if not b:
         raise HTTPException(404, "預約不存在")
+    _assert_can_read_booking(actor, b)
     return _booking_to_read(b)
 
 
 @app.post("/bookings/{booking_id}/cancel", response_model=BookingRead)
 def cancel_booking(
     booking_id: int,
-    data: BookingCancel,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """取消預約（軟刪除：status 改為 cancelled，時段釋出供他人預約）；僅預約本人或 owner 可操作"""
-    actor = db.query(User).filter(User.id == data.user_id).first()
-    if not actor:
-        raise HTTPException(404, "使用者不存在")
+    """取消預約（需登入 Cookie；軟刪除為 cancelled）；僅預約本人或 owner 可操作"""
+    actor = _get_current_user_from_cookie(request, db)
     b = (
         db.query(Booking)
-        .options(joinedload(Booking.services))
+        .options(joinedload(Booking.services), joinedload(Booking.user))
         .filter(Booking.id == booking_id)
         .first()
     )

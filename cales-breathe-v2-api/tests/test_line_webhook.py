@@ -8,6 +8,11 @@ from uuid import uuid4
 import app.main as main_module
 
 
+def _auth_cookies(user_id: int) -> dict[str, str]:
+    token = main_module._create_access_token(user_id)
+    return {main_module.JWT_COOKIE_NAME: token}
+
+
 def _sign_body(secret: str, payload: dict) -> tuple[bytes, str]:
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     signature = base64.b64encode(
@@ -41,21 +46,42 @@ def _post_webhook(client, monkeypatch, events: list, secret: str = "test-secret"
     return resp
 
 
-def _create_booking_in_db(client, monkeypatch) -> int:
-    """建立一個 pending 預約，回傳 booking_id。"""
+def _create_booking_in_db(client, monkeypatch) -> tuple[int, int]:
+    """建立一個 pending 預約，回傳 (booking_id, customer_user_id)。"""
+    from app.models import User
+
     monkeypatch.setattr(main_module, "_push_text_to_line_sync", lambda *a, **kw: None)
     phone = f"09{uuid4().int % 100000000:08d}"
-    user_resp = client.post("/users", json={"name": "wb-customer", "phone": phone, "line_user_id": "U_customer_wb"})
-    user_id = user_resp.json()["id"]
+    db = main_module.SessionLocal()
+    try:
+        u = User(
+            name="wb-customer",
+            phone=phone,
+            line_user_id="U_customer_wb",
+            contact_mail=f"{uuid4().hex[:10]}@wb.example.com",
+            role="customer",
+            provider="local",
+        )
+        db.add(u)
+        db.commit()
+        db.refresh(u)
+        user_id = u.id
+    finally:
+        db.close()
+
     svc_resp = client.get("/services")
     service_id = next(s["id"] for s in svc_resp.json() if s["category"] == "手臂")
-    booking_resp = client.post("/bookings", json={
-        "user_id": user_id,
-        "service_ids": [service_id],
-        "booking_date": "2030-04-01T10:00:00",
-    })
+    booking_resp = client.post(
+        "/bookings",
+        json={
+            "user_id": user_id,
+            "service_ids": [service_id],
+            "booking_date": "2030-04-01T10:00:00",
+        },
+        cookies=_auth_cookies(user_id),
+    )
     assert booking_resp.status_code == 200
-    return booking_resp.json()["id"]
+    return booking_resp.json()["id"], user_id
 
 
 def test_line_webhook_rejects_invalid_signature(client, monkeypatch):
@@ -111,7 +137,7 @@ def test_webhook_owner_confirm_command_changes_status(client, monkeypatch):
     monkeypatch.setenv("OWNER_LINE_USER_ID", OWNER_LINE_ID)
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "fake-token")
 
-    booking_id = _create_booking_in_db(client, monkeypatch)
+    booking_id, wb_user_id = _create_booking_in_db(client, monkeypatch)
 
     push_calls: list = []
 
@@ -133,7 +159,8 @@ def test_webhook_owner_confirm_command_changes_status(client, monkeypatch):
     resp = client.post("/line/webhook", content=raw, headers={"X-Line-Signature": signature})
     assert resp.status_code == 200
 
-    booking_resp = client.get(f"/bookings/{booking_id}")
+    booking_resp = client.get(f"/bookings/{booking_id}", cookies=_auth_cookies(wb_user_id))
+    assert booking_resp.status_code == 200
     assert booking_resp.json()["status"] == "confirmed"
 
     customer_notified = any("U_customer_wb" in uid for uid, _ in push_calls)
@@ -148,7 +175,7 @@ def test_webhook_owner_reject_command_cancels_booking(client, monkeypatch):
     monkeypatch.setenv("OWNER_LINE_USER_ID", OWNER_LINE_ID)
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "fake-token")
 
-    booking_id = _create_booking_in_db(client, monkeypatch)
+    booking_id, wb_user_id = _create_booking_in_db(client, monkeypatch)
 
     push_calls: list = []
 
@@ -170,7 +197,8 @@ def test_webhook_owner_reject_command_cancels_booking(client, monkeypatch):
     resp = client.post("/line/webhook", content=raw, headers={"X-Line-Signature": signature})
     assert resp.status_code == 200
 
-    booking_resp = client.get(f"/bookings/{booking_id}")
+    booking_resp = client.get(f"/bookings/{booking_id}", cookies=_auth_cookies(wb_user_id))
+    assert booking_resp.status_code == 200
     assert booking_resp.json()["status"] == "cancelled"
 
     customer_notified = any("U_customer_wb" in uid for uid, _ in push_calls)
@@ -183,7 +211,7 @@ def test_webhook_non_owner_confirm_rejected(client, monkeypatch):
     """非業主的 LINE 用戶送出「確認」指令，應被拒絕（不影響預約狀態）。"""
     monkeypatch.setenv("OWNER_LINE_USER_ID", "U_real_owner")
 
-    booking_id = _create_booking_in_db(client, monkeypatch)
+    booking_id, wb_user_id = _create_booking_in_db(client, monkeypatch)
 
     async def _noop_reply(**kw):
         pass
@@ -199,7 +227,8 @@ def test_webhook_non_owner_confirm_rejected(client, monkeypatch):
 
     client.post("/line/webhook", content=raw, headers={"X-Line-Signature": signature})
 
-    booking_resp = client.get(f"/bookings/{booking_id}")
+    booking_resp = client.get(f"/bookings/{booking_id}", cookies=_auth_cookies(wb_user_id))
+    assert booking_resp.status_code == 200
     assert booking_resp.json()["status"] == "pending", "非業主不可確認，狀態應維持 pending"
 
 

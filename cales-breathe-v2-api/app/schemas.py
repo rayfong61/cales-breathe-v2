@@ -95,14 +95,12 @@ class BookingCreate(BaseModel):
         return self
 
 
-class BookingCancel(BaseModel):
-    """取消預約時須帶入操作者 user_id（預約本人或 owner）"""
-    user_id: int
-
-
 class BookingRead(BaseModel):
     id: int
     user_id: int | None
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    customer_photo: str | None = None
     booking_date: datetime
     total_duration_minutes: int
     total_price: int
