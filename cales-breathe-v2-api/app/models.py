@@ -30,7 +30,7 @@ class User(Base):
     provider = Column(String(20), default="local")  # local | google | line
 
     # OAuth/LINE login 可先建立 user，手機最後一步再補（phone 允許為空）
-    phone = Column(String(20), unique=True, index=True, nullable=True)
+    phone = Column(String(20), index=True, nullable=True)
     google_user_id = Column(String(100), unique=True, index=True, nullable=True)
     line_user_id = Column(String(100), unique=True, index=True, nullable=True)
 

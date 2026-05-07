@@ -976,15 +976,6 @@ def legacy_account_update2(
     if not mobile:
         raise HTTPException(400, "手機為必填")
 
-    # unique check（避免不同 user 共用同手機）
-    existing = (
-        db.query(User)
-        .filter(User.phone == mobile, User.id != user.id)
-        .first()
-    )
-    if existing:
-        raise HTTPException(409, "手機已被使用")
-
     user.name = payload.client_name.strip() or user.name
     user.phone = mobile
     db.commit()
@@ -1025,13 +1016,6 @@ async def legacy_account_update(
         if contact_mobile is not None:
             mobile = contact_mobile.strip()
             if mobile:
-                existing = (
-                    db.query(User)
-                    .filter(User.phone == mobile, User.id != user.id)
-                    .first()
-                )
-                if existing:
-                    raise HTTPException(409, "手機已被使用")
                 user.phone = mobile
             else:
                 user.phone = None
@@ -1285,13 +1269,6 @@ def legacy_create_order(
             raise HTTPException(404, "客人不存在")
 
         if customer_mobile:
-            existing = (
-                db.query(User)
-                .filter(User.phone == customer_mobile, User.id != target_user.id)
-                .first()
-            )
-            if existing:
-                raise HTTPException(409, "此手機已被其他會員使用，請改填其他號碼。")
             target_user.phone = customer_mobile
         if customer_name:
             target_user.name = customer_name
