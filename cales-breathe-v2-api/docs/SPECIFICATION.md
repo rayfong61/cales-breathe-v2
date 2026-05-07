@@ -72,8 +72,8 @@
 ### 3.5 已知技術債（後續階段處理）
 
 - 衝突檢查：目前載入全部 `confirmed` 後於 Python 迴圈比對 → **階段 E** 改為 DB 區間查詢（必要時併發策略）。
-- **Alembic**、**pytest**（[`tests/`](../tests/)）已具備；**GitHub Actions 等 CI** 仍待補（階段 **J**，與面試改善計畫項目 F 對齊）。
-- **P0** 已完成：`POST /users` 已移除；`/bookings*` 需登入 Cookie 與授權規則（見 [P0-API收斂與安全補強備忘.md](../../docs/P0-API收斂與安全補強備忘.md)）。其餘公開面與正式環境 **`/docs` 保護、CORS、rate limit** 等仍待收斂（階段 F／J）。
+- **Alembic**、**pytest**（[`tests/`](../tests/)）已具備；**GitHub Actions CI** 已上線（`.github/workflows/api-ci.yml`，後端路徑變更觸發 `pytest`）。
+- **P0** 已完成：`POST /users` 已移除；`/bookings*` 需登入 Cookie 與授權規則（見 [P0-API收斂與安全補強備忘.md](../../docs/P0-API收斂與安全補強備忘.md)）。正式環境 **`/docs` 保護、CORS 白名單、登入 rate limit** 已完成第一階段收斂（仍可持續補強敏感路由覆蓋）。
 
 ---
 
@@ -194,8 +194,6 @@ NOTES 底部「選項 A / B / C」：對應 **B / G / C**（細節以本檔階�
 
 ## 8. 待決議事項（TBD）
 
-- [ ] 生產環境是否關閉 `/docs` 或加保護（階段 J）
-- [ ] 正式環境 `/docs`、`openapi.json` 是否關閉或需登入保護
 - [ ] 行事曆與 DB 不一致時的補償流程（階段 H）
 
 ---
@@ -209,11 +207,11 @@ NOTES 底部「選項 A / B / C」：對應 **B / G / C**（細節以本檔階�
 | C | 完成 | | 根目錄 `docker-compose.yml`、Postgres + gateway |
 | D | 完成 | | `alembic/`、baseline 與增量 revision |
 | E | 未開始 | | 衝突查詢仍見 §3.5 |
-| F | 進行中 | | Google／LINE OAuth、短效 JWT + refresh（`refresh_tokens` 表）、`/bookings` 授權；admin／公開面持續收斂 |
+| F | 完成 | | Google／LINE OAuth、短效 JWT + refresh（`refresh_tokens` 表）、`/bookings` 授權已落地；後續為持續補強 |
 | G | 完成 | | `POST /line/webhook`、簽章與冪等鍵 |
 | H | 進行中 | | `google_calendar_event_id`、同步與取消；補償流程論述見 §8 TBD |
 | I | 未開始 | | 預約提醒排程 |
-| J | 進行中 | | 正式部署文件／Vercel+Cloud Run+Supabase；**GitHub Actions 待補** |
+| J | 完成 | | `.github/workflows/api-ci.yml`（pytest）與 `.github/workflows/api-cd.yml`（OIDC/WIF -> build/push/deploy Cloud Run）已上線 |
 
 狀態建議：`未開始` / `進行中` / `完成`。
 
@@ -225,3 +223,4 @@ NOTES 底部「選項 A / B / C」：對應 **B / G / C**（細節以本檔階�
 | --- | --- |
 | 2026-03-20 | 初版：整合 MVP 現況（含 cancel）與階段 A–J 驗收條件 |
 | 2026-05-07 | §3.1／§3.5／§9 對齊：DB 雙模式、Alembic／pytest、P0、階段進度；§2.1 範圍與 webhook |
+| 2026-05-07 | 對齊面試敘事：CI/CD 已上線（api-ci/api-cd）、F/J 狀態更新、移除 docs 保護 TBD |

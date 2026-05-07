@@ -20,7 +20,7 @@
 
 - **LINE 實際對話**：Webhook 驗簽、對話引導或指令完成預約。
 - **Google Calendar 同步**：建立 / 取消預約對應行事曆事件（儲存 `event_id`）。
-- **CI/CD pipeline**：**目標**為 GitHub Actions 自動跑測試與品質檢查（並可銜接部署）；現況見 §8（本地已可 `pytest`，自動化與改善計畫項目 F 對齊）。
+- **CI/CD pipeline**：GitHub Actions 已上線：`api-ci.yml`（`pytest`）+ `api-cd.yml`（OIDC/WIF、build/push Artifact Registry、deploy Cloud Run）。
 
 ---
 
@@ -32,7 +32,7 @@
 - 客人預約、業主代客預約（權限與現有 API 契約對齊或於本檔 §4 明定）。
 - 查詢 / 取消預約；**取消須符合 §3.4「開約前 24 小時內不可取消」**。
 - Google Calendar 同步（建立、取消；失敗時行為見 §6.3）。
-- **測試**：本地 `pytest`（`cales-breathe-v2-api/tests/`）；`ruff`／`black --check` 與 GitHub Actions 為建議／項目 F（見 §8）。
+- **測試**：`cales-breathe-v2-api/tests/` 可本地與 CI (`api-ci.yml`) 執行 `pytest`；`ruff`／`black --check` 為建議加值項。
 
 ### 2.2 第一版不做（避免範圍膨脹）
 
@@ -157,14 +157,14 @@
 | 項目 | 目標 |
 | --- | --- |
 | 測試 | **API 整合測試** + **service 層單元測試**（預約衝突、24 小時取消等）；儲存庫內 **`cales-breathe-v2-api/tests/`** 已可本地執行 `pytest`。 |
-| CI（自動化） | **目標**：GitHub Actions 跑 `pytest`；建議加 `ruff`、`black --check`（與面試改善計畫項目 **F** 對齊）。現況若以程式庫為準：**尚未**佈署 workflow 者，面試應誠實區分「本地測試已可跑」與「CI 綠燈待補」。 |
+| CI（自動化） | GitHub Actions 已上線：`.github/workflows/api-ci.yml` 於後端路徑變更時執行 `pytest`；建議後續加 `ruff`、`black --check`。 |
 | Coverage | 第一版可先產報告；門檻（如 75%）為選用。 |
 
 ---
 
 ## 9. 部署與環境
 
-- **正式**：**Vercel**（前端）＋ **Google Cloud Run**（API）＋ **Supabase**（DB）；環境變數與路由見根 [README.md](../../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)。
+- **正式**：**Vercel**（前端）＋ **Google Cloud Run**（API）＋ **Supabase**（DB）；`api-cd.yml` 已串接 OIDC/WIF 自動部署，環境變數與路由見根 [README.md](../../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)。
 - **Docker**：`Dockerfile` 與根目錄 `docker-compose.yml`（Postgres + API + gateway）提升本機與概念上一致性。
 - **`.env.example`**：列出 `DATABASE_URL`、`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、Google 憑證相關鍵名等（不含真值）。
 
@@ -215,3 +215,4 @@
 | --- | --- |
 | 2026-03-24 | 初版：面試目標、MVP、商業規則、整合與品質、與主規格書分工 |
 | 2026-05-07 | 對齊現況：Vercel／Cloud Run／Supabase；移除公開 `POST /users` 敘述；Render→歷史參考；CI 區分本地與 GitHub Actions 目標 |
+| 2026-05-07 | 對齊現況：GitHub Actions CI/CD（`api-ci.yml` + `api-cd.yml`）已上線，部署敘事改為已完成 |
