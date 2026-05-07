@@ -56,8 +56,9 @@
 
 1. **服務選擇**：`service_ids` 至少一筆；同一 **category** 至多選一項，否則 HTTP **400**。
 2. **服務存在性**：任一所選 id 不存在 → **404**（訊息：部分服務不存在）。
-3. **時段衝突**：與 `status in (pending, confirmed)` 的預約比對；區間重疊則 **409**（該時段已被預約）。  
+3. **時段衝突**：採「應用層 + DB 層」雙保險；與 `status in (pending, confirmed)` 的預約比對，區間重疊則 **409**（該時段已被預約）。  
    - 重疊定義：`new_start < existing_end && existing_start < new_end`（與程式一致）。
+   - PostgreSQL 以 `EXCLUDE USING gist` 約束作為最終防線，避免同時提交造成雙重預約。
    - **時間粒度**：預約開始時間需落在 30 分鐘格線（`HH:00` 或 `HH:30`），否則 **400**。
 4. **取消**：操作者由登入 Cookie 判定；需為預約之 `user_id` 或 `role=owner`，否則 **403**；已取消 idempotent 回傳；非 `confirmed` 不可取消 → **400**。  
    - **時間窗限制**：預約開始前 24 小時內不可取消 → **400**（訊息：開約前 24 小時內不可取消）。
@@ -71,7 +72,7 @@
 
 ### 3.5 已知技術債（後續階段處理）
 
-- 衝突檢查：目前載入全部 `confirmed` 後於 Python 迴圈比對 → **階段 E** 改為 DB 區間查詢（必要時併發策略）。
+- 衝突檢查：應用層已做 overlap check，PostgreSQL 另以 `EXCLUDE` 約束保證併發一致性；SQLite 僅有應用層保護。
 - **Alembic**、**pytest**（[`tests/`](../tests/)）已具備；**GitHub Actions CI** 已上線（`.github/workflows/api-ci.yml`，後端路徑變更觸發 `pytest`）。
 - **P0** 已完成：`POST /users` 已移除；`/bookings*` 需登入 Cookie 與授權規則（見 [P0-API收斂與安全補強備忘.md](../../docs/P0-API收斂與安全補強備忘.md)）。正式環境 **`/docs` 保護、CORS 白名單、登入 rate limit** 已完成第一階段收斂（仍可持續補強敏感路由覆蓋）。
 

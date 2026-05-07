@@ -1447,6 +1447,12 @@ def _booking_create_authorized(actor: User, data: BookingCreate) -> BookingCreat
     )
 
 
+def _is_booking_overlap_integrity_error(exc: IntegrityError) -> bool:
+    """判斷是否為 bookings 時段互斥約束衝突。"""
+    msg = str(getattr(exc, "orig", exc)).lower()
+    return "bookings_no_time_overlap_excl" in msg
+
+
 def _create_booking_core(
     data: BookingCreate,
     background_tasks: BackgroundTasks,
@@ -1504,7 +1510,13 @@ def _create_booking_core(
     )
     booking.services = services
     db.add(booking)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_booking_overlap_integrity_error(exc):
+            raise HTTPException(409, "該時段已被預約") from exc
+        raise
     db.refresh(booking)
 
     if data.add_by_owner is not None:

@@ -2,7 +2,9 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 import app.main as main_module
+import pytest
 from app.models import User
+from sqlalchemy.exc import IntegrityError
 
 
 def _auth_cookies(user_id: int) -> dict[str, str]:
@@ -131,6 +133,30 @@ def test_create_booking_time_conflict(client, monkeypatch):
     )
     assert second.status_code == 409
     assert second.json()["detail"] == "該時段已被預約"
+
+
+def test_is_booking_overlap_integrity_error_detects_constraint_name():
+    exc = IntegrityError(
+        "INSERT INTO bookings ...",
+        {},
+        Exception('violates exclusion constraint "bookings_no_time_overlap_excl"'),
+    )
+    assert main_module._is_booking_overlap_integrity_error(exc) is True
+
+
+def test_is_booking_overlap_integrity_error_ignores_other_integrity_errors():
+    exc = IntegrityError(
+        "INSERT INTO users ...",
+        {},
+        Exception('duplicate key value violates unique constraint "users_contact_mail_key"'),
+    )
+    assert main_module._is_booking_overlap_integrity_error(exc) is False
+
+
+def test_postgresql_overlap_constraint_integration_requires_postgresql(client):
+    with main_module.SessionLocal() as db:
+        if db.bind is None or db.bind.dialect.name != "postgresql":
+            pytest.skip("此案例僅在 PostgreSQL 執行，SQLite 不支援 EXCLUDE 約束")
 
 
 def test_create_booking_requires_30_minute_grid(client, monkeypatch):
