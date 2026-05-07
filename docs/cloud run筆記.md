@@ -19,6 +19,7 @@
 - Artifact Registry Repo：`cales-api`
 - Image：`asia-east1-docker.pkg.dev/cale-458405/cales-api/cales-breathe-api:latest`
 - Cloud Run URL：`https://cales-breathe-api-564346395090.asia-east1.run.app`
+- 正式環境統一以 `cales-breathe-api` 為唯一 API 服務名，避免前端 rewrite 與 CD 指向不同服務。
 
 ---
 

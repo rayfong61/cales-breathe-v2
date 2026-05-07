@@ -52,6 +52,23 @@ Compose 會用 `POSTGRES_*` 組出 `DATABASE_URL` 覆寫後端連線（**不使�
 
 若使用 `127.0.0.1` 或加埠，請與後端 `.env` 完全一致，勿混用 `localhost` 與 `127.0.0.1`。
 
+## CI/CD 現況
+
+- API CI：`.github/workflows/api-ci.yml` 會在 PR 或 push（`main`/`master`）時跑 `pytest`。
+- Path 篩選：僅當變更包含 `cales-breathe-v2-api/**` 或 `.github/workflows/api-ci.yml` 才觸發；只改前端時不觸發屬預期。
+- API CD：`.github/workflows/api-cd.yml` 已串接 GitHub Actions + OIDC/WIF，流程為 build image -> push Artifact Registry -> deploy Cloud Run。
+
+## Production API 文件存取
+
+- 在 `ENVIRONMENT=production`（或 `APP_ENV=production`）時，若未設定 `DOCS_BASIC_USER`/`DOCS_BASIC_PASSWORD`，`/docs`、`/redoc`、`/openapi.json` 預設關閉。
+- 若設定上述帳密，則改為 HTTP Basic 保護。
+- 可用 `DISABLE_API_DOCS=1` 強制關閉 API 文件端點。
+
+## 登入限流（Rate Limit）
+
+- `POST /login` 已啟用 Redis Token Bucket 限流（key：IP + contact_mail）。
+- 超限回應 `429`，並帶 `Retry-After`。
+
 ## LINE Messaging Webhook
 
 LINE 伺服器需 **HTTPS 公網網址**；本機請用 **ngrok** 等隧道，Webhook 設為：
