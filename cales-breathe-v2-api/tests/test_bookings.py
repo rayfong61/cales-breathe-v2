@@ -487,10 +487,8 @@ def test_list_bookings_includes_pending(client, monkeypatch):
     assert all(b["status"] == "pending" for b in pending_only.json())
 
 
-def test_duplicate_phone_rejected_at_database(client):
-    """users.phone unique：第二筆同號應無法 commit。"""
-    from sqlalchemy.exc import IntegrityError
-
+def test_duplicate_phone_allowed_at_database(client):
+    """users.phone 非 unique：可儲存多筆相同手機。"""
     db = main_module.SessionLocal()
     try:
         u1 = User(
@@ -512,11 +510,9 @@ def test_duplicate_phone_rejected_at_database(client):
         db.add(u1)
         db.commit()
         db.add(u2)
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-        else:
-            raise AssertionError("expected IntegrityError for duplicate phone")
+        db.commit()
+
+        same_phone_users = db.query(User).filter(User.phone == "0911111111").all()
+        assert len(same_phone_users) >= 2
     finally:
         db.close()
