@@ -1,4 +1,5 @@
 import { createContext, useEffect, useState, useContext } from "react";
+import { api } from "../api/client";
 
 const AuthContext = createContext();
 
@@ -7,32 +8,19 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-  const api = import.meta.env.VITE_API_BASE;
-
-  const fetchUser = async () => {
-    try {
-      const res = await fetch(`${api}/me`, {
-        credentials: "include",
-      });
-
-      if (!res.ok) {
+    const fetchUser = async () => {
+      try {
+        const res = await api.get("/me");
+        setUser(res.data?.user || null);
+      } catch {
         setUser(null);
+      } finally {
         setLoading(false);
-        return;
       }
+    };
 
-      const data = await res.json();
-      setUser(data.user || null);
-    } catch (error) {
-      console.error("無法取得使用者資料", error);
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  fetchUser();
-}, []);
+    fetchUser();
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, setUser, loading }}>

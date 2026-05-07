@@ -20,7 +20,7 @@
 
 - **LINE 實際對話**：Webhook 驗簽、對話引導或指令完成預約。
 - **Google Calendar 同步**：建立 / 取消預約對應行事曆事件（儲存 `event_id`）。
-- **CI/CD pipeline**：GitHub 上自動跑品質檢查與測試（並可銜接部署）。
+- **CI/CD pipeline**：**目標**為 GitHub Actions 自動跑測試與品質檢查（並可銜接部署）；現況見 §8（本地已可 `pytest`，自動化與改善計畫項目 F 對齊）。
 
 ---
 
@@ -32,7 +32,7 @@
 - 客人預約、業主代客預約（權限與現有 API 契約對齊或於本檔 §4 明定）。
 - 查詢 / 取消預約；**取消須符合 §3.4「開約前 24 小時內不可取消」**。
 - Google Calendar 同步（建立、取消；失敗時行為見 §6.3）。
-- CI：至少 `pytest`；建議加上 `ruff`、`black --check`（見 §8）。
+- **測試**：本地 `pytest`（`cales-breathe-v2-api/tests/`）；`ruff`／`black --check` 與 GitHub Actions 為建議／項目 F（見 §8）。
 
 ### 2.2 第一版不做（避免範圍膨脹）
 
@@ -40,13 +40,14 @@
 - 多店員 / 多時區排班（現階段 **全域互斥** 即可）。
 - 複雜會員系統（重設密碼、Email 驗證等）。
 
-### 2.3 技術路徑（已決策）
+### 2.3 技術路徑（已決策／現況）
 
 | 項目 | 決策 |
 | --- | --- |
-| 資料庫 | **先 SQLite 完成功能**，再升級 **PostgreSQL**（與 [SPECIFICATION.md](./SPECIFICATION.md) 階段 C 一致）。 |
-| Schema 遷移 | **第二階段**導入 **Alembic**（階段 D）。 |
-| 部署 | **Render**；希望具 **Docker / docker-compose** 以利環境一致（見 §9）。 |
+| 資料庫 | **雙模式**：無 `DATABASE_URL` 時可 **SQLite** 本機快速開發；Docker Compose／正式環境為 **PostgreSQL**（細節見 [SPECIFICATION.md](./SPECIFICATION.md) §3.1、`app/database.py`）。 |
+| Schema 遷移 | **Alembic 已導入**（`alembic/versions/`）；新環境以 `upgrade head` 為準（階段 D）。 |
+| 部署 | **Vercel**（前端 SPA）＋ **Google Cloud Run**（FastAPI）＋ **Supabase**（PostgreSQL）；根目錄 [README.md](../../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)。儲存庫內 `render.yaml` 僅為**歷史／可選**參考，避免與實際上線網址混淆。 |
+| 本機一致性 | **Docker Compose**（Postgres + API + NGINX gateway），見根目錄 `docker-compose.yml`。 |
 | 整合 demo | **真實** LINE / Google 憑證可演示（機密僅環境變數，不入庫）。 |
 
 ---
@@ -85,14 +86,25 @@
 
 與 [SPECIFICATION.md §3.2](./SPECIFICATION.md) 對齊，並預留：
 
+**帳號建立（P0）**：已移除匿名 **`POST /users`**。使用者透過 **Google／LINE OAuth** 或 **`POST /login`／`POST /register`** 登入；後端以 **HttpOnly** cookie 下發 **短效 access JWT**（`cb_access_token`）與 **refresh opaque token**（`cb_refresh_token`）；refresh 於 **`refresh_tokens`** 表仅存 **SHA-256 hash**、可輪替與撤銷。詳見 OAuth 路由與 [SPECIFICATION.md](./SPECIFICATION.md) 階段 F。
+
+| 方法 | 路徑 | 說明 |
+| --- | --- | --- |
+| GET | `/auth/google` | 導向 Google OAuth |
+| GET | `/auth/google/callback` | Google 回調 |
+| GET | `/auth/line` | 導向 LINE Login |
+| GET | `/auth/line/callback` | LINE 回調 |
+| POST | `/auth/refresh` | 以 refresh cookie 換發新 access + refresh（輪替） |
+| POST | `/auth/logout` | 撤銷該使用者所有 refresh 列並清除雙 cookie |
+| GET | `/logout` | 與 `POST /auth/logout` 行為一致（相容舊前端） |
+
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
 | POST | `/line/webhook` | LINE Messaging API Webhook；驗證 `X-Line-Signature`；冪等處理 |
 | GET | `/health` | 健康檢查 |
 | GET | `/services` | 服務清單 |
 | GET | `/services/by-category` | 依分類分組 |
-| POST | `/users` | 建立使用者（導入認證後公開範圍見 §7） |
-| POST | `/bookings` | 建立預約 |
+| POST | `/bookings` | 建立預約（需登入；細則見主規格書） |
 | GET | `/bookings` | 查詢；`date=YYYY-MM-DD` 可選 |
 | GET | `/bookings/{id}` | 單筆 |
 | POST | `/bookings/{id}/cancel` | 取消（含 24 小時規則） |
@@ -134,9 +146,9 @@
 | 階段 | 做法 |
 | --- | --- |
 | 短期 | LINE Bot 以 **Webhook 簽章 + `line_user_id`** 識別使用者；與 DB `User` 綁定。 |
-| 目標 | **LINE Login（OAuth 2.0）** 完成授權後，後端簽發 **JWT**，保護需登入之 REST API（與 [SPECIFICATION.md 階段 F](./SPECIFICATION.md) 一致）。 |
+| 目標 | **LINE Login（OAuth 2.0）** 完成授權後，後端建立 **我方 session**（短效 access JWT + refresh），保護需登入之 REST API（與 [SPECIFICATION.md 階段 F](./SPECIFICATION.md) 一致）。 |
 
-說明：OAuth 是授權流程；LINE Login 是 LINE 提供的 OAuth 實作；登入成功後後端發 JWT 給前端／LIFF 用於後續 API 為常見模式。
+說明：OAuth 是授權流程；LINE Login 是 LINE 提供的 OAuth 實作；登入成功後後端以 **HttpOnly cookie** 下發 access／refresh（refresh 僅用於 `POST /auth/refresh`），與「把長效 JWT 放 localStorage」相比可降低 XSS 竊取長期憑證的風險；前端遇 **401** 可呼叫 refresh 後重試一次。
 
 ---
 
@@ -144,16 +156,16 @@
 
 | 項目 | 目標 |
 | --- | --- |
-| 測試 | **API 整合測試** + **service 層單元測試**（預約衝突、24 小時取消等）。 |
-| CI | GitHub Actions：`pytest`；建議加 `ruff`、`black --check`。 |
+| 測試 | **API 整合測試** + **service 層單元測試**（預約衝突、24 小時取消等）；儲存庫內 **`cales-breathe-v2-api/tests/`** 已可本地執行 `pytest`。 |
+| CI（自動化） | **目標**：GitHub Actions 跑 `pytest`；建議加 `ruff`、`black --check`（與面試改善計畫項目 **F** 對齊）。現況若以程式庫為準：**尚未**佈署 workflow 者，面試應誠實區分「本地測試已可跑」與「CI 綠燈待補」。 |
 | Coverage | 第一版可先產報告；門檻（如 75%）為選用。 |
 
 ---
 
 ## 9. 部署與環境
 
-- **Render**：部署目標；設定環境變數與啟動指令文件化（README 或 `docs/DEPLOYMENT.md`）。
-- **Docker**：`Dockerfile` 與／或 `docker-compose.yml`（app + 日後 postgres）提升本機與雲端一致性。
+- **正式**：**Vercel**（前端）＋ **Google Cloud Run**（API）＋ **Supabase**（DB）；環境變數與路由見根 [README.md](../../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)。
+- **Docker**：`Dockerfile` 與根目錄 `docker-compose.yml`（Postgres + API + gateway）提升本機與概念上一致性。
 - **`.env.example`**：列出 `DATABASE_URL`、`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、Google 憑證相關鍵名等（不含真值）。
 
 ---
@@ -162,7 +174,7 @@
 
 - **可觀測性**：結構化 log（route、status、latency、request id 擇一）。
 - **安全性**：密鑰僅環境變數；生產是否關閉 `/docs` 見主規格書 §8 待決議。
-- **健康檢查**：`/health` 可用於 Render／負載檢查。
+- **健康檢查**：`/health` 可用於 **Cloud Run** 探針／雲端負載檢查。
 
 ---
 
@@ -173,7 +185,7 @@
 - [x] 取消：**24 小時內不可取消**（已落地並補測試）。
 - [x] 時間粒度：**30 分鐘** 規則與驗證。
 - [x] **手機號碼 unique** 與主要識別敘述。
-- [ ] `POST /line/webhook`、Google `event_id` 欄位與同步流程。
+- [x] `POST /line/webhook`、Google Calendar `event_id`／`google_calendar_event_id` 欄位與同步流程（以程式與 migration 為準）。
 
 ---
 
@@ -183,8 +195,8 @@
 | --- | --- | --- |
 | 1 | 規則與測試先行 | 24h 取消、日期篩選、邊界衝突、422；service 單測 |
 | 2 | LINE Webhook MVP | 驗簽、回覆、建單、冪等 |
-| 3 | Google Calendar + CI | 事件建立/取消、`event_id`；GitHub Actions 綠燈 |
-| 4 | Render + 文件 | 可遠端 demo；README 與環境變數說明齊全 |
+| 3 | Google Calendar + CI | 事件建立/取消、`event_id`；**目標** GitHub Actions 綠燈（本地 `pytest` 先行） |
+| 4 | Cloud Run + Vercel + 文件 | 可遠端 demo；README、[本地與雲端部署.md](../../docs/本地與雲端部署.md) 與環境變數說明齊全 |
 
 （細部工時可再拆 issue；階段編號仍與主規格書 A–J 對照。）
 
@@ -202,3 +214,4 @@
 | 日期 | 摘要 |
 | --- | --- |
 | 2026-03-24 | 初版：面試目標、MVP、商業規則、整合與品質、與主規格書分工 |
+| 2026-05-07 | 對齊現況：Vercel／Cloud Run／Supabase；移除公開 `POST /users` 敘述；Render→歷史參考；CI 區分本地與 GitHub Actions 目標 |

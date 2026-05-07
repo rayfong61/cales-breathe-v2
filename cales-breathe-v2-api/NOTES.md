@@ -24,7 +24,7 @@
     - 接收客人文字或按鈕操作，引導完成預約流程。
     - 可提供 LIFF 小網頁作為「簡易後台」給業主使用。
   - **FastAPI 後端**
-    - 路由範例：`/line/webhook`, `/bookings`, `/services`, `/users`, `/admin/...`。
+    - 路由範例：`/line/webhook`, `/bookings`, `/services`, `/auth/google`, `/auth/line`, `/admin/...`（完整表見 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) §3.2）。
     - 處理預約流程、時間衝突檢查、身分驗證、權限控管。
     - 與 PostgreSQL、Google Calendar、LINE API 溝通。
   - **PostgreSQL + SQLAlchemy**
@@ -122,14 +122,16 @@
 
 ## 最小 MVP（SQLite 版本）- 已完成
 
+> **歷史 baseline（勿當作現況全文）**：以下描述早期「零依賴 SQLite」起點；專案已演進為 **OAuth／Cookie**、**Docker Compose + Postgres**、**Alembic**、**P0 移除公開 `POST /users`** 等。現行契約與 API 路徑以 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) §3 為準；安全與預約收斂見 [P0-API收斂與安全補強備忘.md](../docs/P0-API收斂與安全補強備忘.md)。
+
 - **技術**：FastAPI + SQLAlchemy + SQLite（單一檔案，零額外安裝）
 - **資料表**：`users`、`services`、`bookings`、`booking_services`（多對多關聯）
 - **API 端點**：
   - `GET /health`：健康檢查
   - `GET /services`：列出所有服務（依選單分類順序，24 筆）
   - `GET /services/by-category`：依分類分組（給 LINE Bot 選單用）
-  - `POST /users`：建立使用者
-  - `POST /bookings`：建立預約（`service_ids: [1, 5, 21]` 支援多服務，含 X選1 驗證與時段衝突檢查）
+  - ~~`POST /users`：建立使用者~~（**已移除**；帳號改由 OAuth 等流程，見 P0 備忘）
+  - `POST /bookings`：建立預約（`service_ids: [1, 5, 21]` 支援多服務，含 X選1 驗證與時段衝突檢查；**現需登入**）
   - `GET /bookings?date=YYYY-MM-DD`：查詢預約（可選日期）
   - `GET /bookings/{id}`：取得單一預約（含 services、total_duration_minutes、total_price）
 
@@ -142,7 +144,7 @@
   ```
   開啟 http://127.0.0.1:8000/docs 可測試 Swagger UI。
 
-- **後續升級**：要切換到 PostgreSQL 時，只需修改 `app/database.py` 的 `DATABASE_URL` 即可。
+- **後續升級**：已支援以環境變數 **`DATABASE_URL`** 切換 **PostgreSQL**（見 `app/database.py`）；正式與本機整合路線見根目錄 README、Docker Compose。
 
 ---
 

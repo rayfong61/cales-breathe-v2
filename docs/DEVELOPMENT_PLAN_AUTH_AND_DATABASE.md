@@ -6,7 +6,7 @@
 
 | 項目 | 路徑 |
 |------|------|
-| JWT／Cookie | [`cales-breathe-v2-api/app/main.py`](../cales-breathe-v2-api/app/main.py)（`JWT_COOKIE_NAME`、`JWT_TTL_DAYS`、`_create_access_token`、`_set_auth_cookie`） |
+| JWT／Cookie／Refresh | [`cales-breathe-v2-api/app/auth_session.py`](../cales-breathe-v2-api/app/auth_session.py)；[`main.py`](../cales-breathe-v2-api/app/main.py) 掛載 `/auth/refresh`、`/auth/logout`；[`oauth.py`](../cales-breathe-v2-api/app/oauth.py) 成功後 `issue_auth_session` |
 | Google／LINE OAuth | [`cales-breathe-v2-api/app/oauth.py`](../cales-breathe-v2-api/app/oauth.py)（`line_callback`、`_oauth_success_redirect`） |
 | 前端登入導向 | [`cales-breathe-v2-vite/src/pages/Login.jsx`](../cales-breathe-v2-vite/src/pages/Login.jsx)、[`Booking-step3.jsx`](../cales-breathe-v2-vite/src/pages/Booking-step3.jsx) |
 | DB 初始化 | [`cales-breathe-v2-api/app/database.py`](../cales-breathe-v2-api/app/database.py)（`create_all`） |
@@ -16,10 +16,10 @@
 
 ## 1. JWT：導入 Refresh Token
 
-### 1.1 現況
+### 1.1 現況（已實作）
 
-- 單一 **access** JWT 置於 HttpOnly cookie `cb_access_token`，效期約 **30 天**（`JWT_TTL_DAYS`）。
-- 無 refresh 流程；過期即回 401「登入已過期」。
+- **短效 access** JWT（`purpose: access`）於 HttpOnly **`cb_access_token`**（`ACCESS_TOKEN_TTL_MINUTES`，預設 60 分）。
+- **Refresh** opaque token 於 HttpOnly **`cb_refresh_token`**；`refresh_tokens` 表仅存 **hash**、可輪替；`POST /auth/refresh`；登出撤銷並清 cookie。
 
 ### 1.2 目標
 

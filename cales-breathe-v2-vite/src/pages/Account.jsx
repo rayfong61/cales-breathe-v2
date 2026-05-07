@@ -1,12 +1,11 @@
 import { useAuth } from "../components/AuthContext"; 
 import { useState, useEffect } from "react";
-import axios from "axios";
+import { api } from "../api/client";
 import Orders from "../components/Orders";
 import { useNavigate } from "react-router";
 
 
 function Account() {
-    const api = import.meta.env.VITE_API_BASE;
     const navigate = useNavigate();
     const fallbackPhoto = "default.jpg"; 
     const [isBooking, setIsBooking] = useState(true);
@@ -96,8 +95,7 @@ function Account() {
       }
     
       try {
-        const res = await axios.put(`${api}/account/update`, data, {
-          withCredentials: true,
+        const res = await api.put("/account/update", data, {
           headers: { "Content-Type": "multipart/form-data" },
         });
     
@@ -126,14 +124,14 @@ function Account() {
   
     
     const handleLogout = () => {
-        fetch(`${api}/logout`, {
-          method: "GET",
-          credentials: "include",
-        })
-          .then((res) => res.json())
+        api.post("/auth/logout")
           .then(() => {
             setUser(null);
-            window.location.href = "/"; // 可選：登出後導回首頁
+            window.location.href = "/";
+          })
+          .catch(() => {
+            setUser(null);
+            window.location.href = "/";
           });
       };
 
@@ -141,20 +139,13 @@ function Account() {
       const yes = window.confirm("確定要刪除帳號嗎？此動作無法復原，且會刪除所有預約紀錄。");
       if (!yes) return;
       try {
-        const res = await fetch(`${api}/account`, {
-          method: "DELETE",
-          credentials: "include",
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          alert(data.detail || data.message || "刪除失敗");
-          return;
-        }
+        await api.delete("/account");
         setUser(null);
         alert("帳號已刪除");
         window.location.href = "/";
       } catch (err) {
-        alert("刪除失敗，請稍後再試");
+        const data = err?.response?.data;
+        alert(data?.detail || data?.message || "刪除失敗，請稍後再試");
       }
     };
       

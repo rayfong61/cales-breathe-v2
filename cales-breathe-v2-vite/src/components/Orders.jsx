@@ -1,9 +1,8 @@
-import axios from "axios";
 import { useState, useEffect } from "react";
 import { useAuth } from "../components/AuthContext"; 
+import { api } from "../api/client";
 
 function Orders() {
-  const api = import.meta.env.VITE_API_BASE;
   const CANCELLED_META_KEY = "cancelled_orders_meta_v1";
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
   const { user } = useAuth();
@@ -61,7 +60,7 @@ function Orders() {
     if (!window.confirm("確定要取消這筆預約嗎？")) return;
   
     try {
-      await axios.post(`${api}/bookings/${id}/cancel`, {}, { withCredentials: true });
+      await api.post(`/bookings/${id}/cancel`, {});
       const cancelledAt = new Date().toISOString();
       // 不直接移除，改為標記已取消，保留歷史紀錄更符合帳務/預約情境
       setOrders((prev) =>
@@ -92,7 +91,7 @@ function Orders() {
 
     const fetchOrders = async () => {
       try {
-        const res = await axios.get(`${api}/bookings`, { withCredentials: true });
+        const res = await api.get("/bookings");
         setOrders((res.data || []).map(toLegacyLikeOrder));
         // console.log(res.data);
       } catch (err) {

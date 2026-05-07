@@ -31,7 +31,7 @@
 
 ### 建議（上線與整合）
 
-- [ ] **部署說明**：可放在 README 一節或 `docs/DEPLOYMENT.md`（Render、Docker、環境變數）
+- [ ] **部署說明**：現行路線見根目錄 [README.md](../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)（Vercel、Cloud Run、Supabase、Docker）；歷史或選型參考另見 `DEPLOYMENT_STATUS.md`、`render.yaml`
 - [ ] **架構圖或資料流**（一頁即可）：LINE → API → DB → Google Calendar；可放 `docs/` 或 README
 
 ### 選用（團隊變大時）

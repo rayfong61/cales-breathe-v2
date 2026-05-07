@@ -22,8 +22,8 @@
 
 ### 2.1 範圍內
 
-- FastAPI 後端：預約、服務、使用者、（未來）LINE Webhook、管理端、行事曆與提醒。
-- 資料：SQLite（MVP）→ PostgreSQL（目標）；Schema 以 SQLAlchemy models 為準，遷移以 Alembic 為準。
+- FastAPI 後端：預約、服務、使用者、**LINE Webhook**、OAuth 登入／Cookie、Google Calendar 同步（細見 §9）；管理端、提醒排程等延續階段表。
+- 資料：依 `DATABASE_URL` 為 **SQLite**（預設本機）或 **PostgreSQL**（Docker Compose／Supabase 等）；Schema 以 SQLAlchemy models 為準，遷移以 **Alembic** 為準。
 
 ### 2.2 範圍外（本規格不強制實作時程）
 
@@ -37,14 +37,14 @@
 ### 3.1 技術
 
 - Python：FastAPI、Uvicorn、SQLAlchemy 2.x。
-- DB：SQLite 檔案 `app.db`（[app/database.py](../app/database.py)）。
-- 啟動時：`lifespan` 內 `init_db()` + 服務種子（[app/main.py](../app/main.py)）。
+- DB：[app/database.py](../app/database.py) 依 **`DATABASE_URL`**：`sqlite:///./app.db`（未設定時預設）或 **PostgreSQL**（連線字串）。根目錄 **Docker Compose** 會注入 Postgres，與正式環境 **Supabase** 同為 PostgreSQL 路線。
+- 啟動時：`lifespan` 內 `init_db()` + 服務種子（[app/main.py](../app/main.py)）；正式／Compose 環境建議 **`alembic upgrade head`** 與 models 對齊。
 
 ### 3.2 HTTP API 一覽
 
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
-| GET | `/health` | 健康檢查；回傳含 `db` 識別（目前為 sqlite） |
+| GET | `/health` | 健康檢查；回傳含 `db` 識別（`sqlite` 或 `postgresql` 等，依連線而定） |
 | GET | `/services` | 列出服務；依 `CATEGORY_ORDER` 與 `sort_order` 排序 |
 | GET | `/services/by-category` | 依分類分組（供 LINE 選單）；分類順序同 `CATEGORY_ORDER` |
 | POST | `/bookings` | 建立預約（`BookingCreate`） |
@@ -66,14 +66,14 @@
 
 - `users`：`name`, `line_user_id`（unique 可空）, `phone`（unique）, `role`（`customer` \| `owner`）, `created_at`。
 - `services`：`name`, `category`, `duration_minutes`, `price`, `sort_order`, `created_at`。
-- `bookings`：`user_id`, `booking_date`, `total_duration_minutes`, `total_price`, `status`, `notes`, `created_at`。
+- `bookings`：`user_id`, `booking_date`, `total_duration_minutes`, `total_price`, `status`, `notes`, `google_calendar_event_id`（可空）, `created_at` 等（實作以 [app/models.py](../app/models.py) 為準）。
 - `booking_services`：多對多關聯。
 
 ### 3.5 已知技術債（後續階段處理）
 
 - 衝突檢查：目前載入全部 `confirmed` 後於 Python 迴圈比對 → **階段 E** 改為 DB 區間查詢（必要時併發策略）。
-- 無 Alembic、無 pytest、無 CI：依階段 B、D、J。
-- `/bookings` 系列已改為需登入 Cookie；其餘公開範圍仍需持續收斂（**階段 F/J**）。
+- **Alembic**、**pytest**（[`tests/`](../tests/)）已具備；**GitHub Actions 等 CI** 仍待補（階段 **J**，與面試改善計畫項目 F 對齊）。
+- **P0** 已完成：`POST /users` 已移除；`/bookings*` 需登入 Cookie 與授權規則（見 [P0-API收斂與安全補強備忘.md](../../docs/P0-API收斂與安全補強備忘.md)）。其餘公開面與正式環境 **`/docs` 保護、CORS、rate limit** 等仍待收斂（階段 F／J）。
 
 ---
 
@@ -121,8 +121,8 @@
 
 | 項目 | 規格 |
 | --- | --- |
-| 交付物 | JWT 或 OAuth2 簡化版或 API Key（擇一）；`/admin/...` 僅 `owner`；公開端點策略**明文化** |
-| 驗收 | 未授權無法操作管理端；與測試策略一致（測試 token 或 dependency override） |
+| 交付物 | **短效 access JWT** + **HttpOnly refresh**（DB 存 token hash、輪替、`POST /auth/refresh`）；OAuth／本地登入皆簽發雙 cookie；`/admin/...` 僅 `owner`；公開端點策略**明文化** |
+| 驗收 | 未授權無法操作管理端；refresh 可撤銷（登出）；與測試策略一致（測試 token 或 dependency override） |
 
 ### 階段 G — LINE Webhook
 
@@ -183,7 +183,11 @@ NOTES 底部「選項 A / B / C」：對應 **B / G / C**（細節以本檔階�
 | `DATABASE_URL` | C | 例如 Postgres 連線字串 |
 | `LINE_CHANNEL_SECRET` | G | Webhook 簽章 |
 | `LINE_CHANNEL_ACCESS_TOKEN` | G、I | 回覆與 push |
-| JWT / OAuth 相關 | F | 依實作補列 |
+| `JWT_SECRET` | F | HS256 簽章用 |
+| `ACCESS_TOKEN_TTL_MINUTES` | F | access JWT 分鐘數（預設 60） |
+| `REFRESH_TOKEN_TTL_DAYS` | F | refresh cookie／DB 列天數（預設 30） |
+| `ACCESS_TOKEN_COOKIE_NAME`／`REFRESH_TOKEN_COOKIE_NAME` | F | 選用；預設 `cb_access_token`、`cb_refresh_token` |
+| Google／LINE OAuth 變數 | F | 見 `.env.example` |
 | Google 憑證路徑或 JSON | H | Service Account 等 |
 
 ---
@@ -200,16 +204,16 @@ NOTES 底部「選項 A / B / C」：對應 **B / G / C**（細節以本檔階�
 
 | 階段 | 狀態 | 完成日期 | 備註 |
 | --- | --- | --- | --- |
-| A | 未開始 | | |
-| B | 未開始 | | |
-| C | 未開始 | | |
-| D | 未開始 | | |
-| E | 未開始 | | |
-| F | 未開始 | | |
-| G | 未開始 | | |
-| H | 未開始 | | |
-| I | 未開始 | | |
-| J | 未開始 | | |
+| A | 完成 | | Git、README、`.gitignore` 等 |
+| B | 完成 | | `pytest`、`tests/`、`conftest.py` |
+| C | 完成 | | 根目錄 `docker-compose.yml`、Postgres + gateway |
+| D | 完成 | | `alembic/`、baseline 與增量 revision |
+| E | 未開始 | | 衝突查詢仍見 §3.5 |
+| F | 進行中 | | Google／LINE OAuth、短效 JWT + refresh（`refresh_tokens` 表）、`/bookings` 授權；admin／公開面持續收斂 |
+| G | 完成 | | `POST /line/webhook`、簽章與冪等鍵 |
+| H | 進行中 | | `google_calendar_event_id`、同步與取消；補償流程論述見 §8 TBD |
+| I | 未開始 | | 預約提醒排程 |
+| J | 進行中 | | 正式部署文件／Vercel+Cloud Run+Supabase；**GitHub Actions 待補** |
 
 狀態建議：`未開始` / `進行中` / `完成`。
 
@@ -220,3 +224,4 @@ NOTES 底部「選項 A / B / C」：對應 **B / G / C**（細節以本檔階�
 | 日期 | 變更摘要 |
 | --- | --- |
 | 2026-03-20 | 初版：整合 MVP 現況（含 cancel）與階段 A–J 驗收條件 |
+| 2026-05-07 | §3.1／§3.5／§9 對齊：DB 雙模式、Alembic／pytest、P0、階段進度；§2.1 範圍與 webhook |

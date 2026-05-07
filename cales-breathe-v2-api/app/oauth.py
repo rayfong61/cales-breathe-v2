@@ -17,8 +17,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 
-CreateToken = Callable[[int], str]
-SetCookie = Callable[[Response, str], None]
+IssueAuthSession = Callable[[Session, Response, int], None]
 
 
 def _jwt_secret() -> str:
@@ -273,10 +272,7 @@ def _line_exchange_code(code: str, redirect_uri: str) -> tuple[str, str | None, 
         return user_id, name, picture
 
 
-def create_oauth_router(
-    create_access_token: CreateToken,
-    set_auth_cookie: SetCookie,
-) -> APIRouter:
+def create_oauth_router(issue_auth_session: IssueAuthSession) -> APIRouter:
     router = APIRouter(tags=["oauth"])
 
     @router.post("/auth/oauth-bind/confirm")
@@ -320,8 +316,7 @@ def create_oauth_router(
                 raise HTTPException(503, "資料庫忙碌中，請稍後重試")
             db.refresh(user)
 
-        auth = create_access_token(user.id)
-        set_auth_cookie(response, auth)
+        issue_auth_session(db, response, user.id)
         return {"message": "綁定成功並登入", "user": {"user": {"id": user.id}}}
 
     @router.get("/auth/google")
@@ -448,9 +443,8 @@ def create_oauth_router(
                 db.commit()
                 db.refresh(user)
 
-            token = create_access_token(user.id)
             resp = _oauth_success_redirect(fo, red)
-            set_auth_cookie(resp, token)
+            issue_auth_session(db, resp, user.id)
             return resp
         except OperationalError:
             return _oauth_db_unreachable_redirect(fo, red)
@@ -548,9 +542,8 @@ def create_oauth_router(
                 db.commit()
                 db.refresh(user)
 
-            token = create_access_token(user.id)
             resp = _oauth_success_redirect(fo, red)
-            set_auth_cookie(resp, token)
+            issue_auth_session(db, resp, user.id)
             return resp
         except OperationalError:
             return _oauth_db_unreachable_redirect(fo, red)

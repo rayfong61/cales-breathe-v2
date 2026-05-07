@@ -17,7 +17,6 @@ import os
 from uuid import uuid4
 
 import httpx
-import jwt
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -41,6 +40,17 @@ from passlib.context import CryptContext
 from app.database import get_db, init_db, SessionLocal
 from app.models import User, Service, Booking, LineWebhookEvent, booking_services
 from app import google_calendar as gcal
+from app.auth_session import (
+    access_cookie_name,
+    clear_session_cookies,
+    create_access_token,
+    decode_access_token,
+    issue_auth_session,
+    refresh_cookie_name,
+    refresh_session,
+    resolve_user_for_logout,
+    revoke_all_refresh_for_user,
+)
 from app.schemas import (
     ServiceRead,
     UserRead,
@@ -105,76 +115,28 @@ SEED_SERVICES = [
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-JWT_COOKIE_NAME = "cb_access_token"
-JWT_TTL_DAYS = 30
-
-
-def _jwt_secret() -> str:
-    secret = os.getenv("JWT_SECRET", "").strip()
-    if not secret:
-        raise HTTPException(500, "缺少 JWT_SECRET 設定")
-    return secret
-
-
-def _cookie_secure() -> bool:
-    # Default to false for local HTTP testing; set COOKIE_SECURE=true in production.
-    return os.getenv("COOKIE_SECURE", "false").strip().lower() == "true"
-
-
-def _cookie_samesite() -> str:
-    raw = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()
-    if raw not in {"lax", "strict", "none"}:
-        raw = "none"
-    # Browsers reject SameSite=None without Secure, fallback for local HTTP testing.
-    if raw == "none" and not _cookie_secure():
-        return "lax"
-    return raw
+# 測試／舊程式碼相容：access cookie 名稱（實際讀取見 app.auth_session.access_cookie_name）
+JWT_COOKIE_NAME = access_cookie_name()
 
 
 def _create_access_token(user_id: int) -> str:
-    now = datetime.now(timezone.utc)
-    exp = now + timedelta(days=JWT_TTL_DAYS)
-    payload = {"sub": str(user_id), "iat": int(now.timestamp()), "exp": int(exp.timestamp())}
-    return jwt.encode(payload, _jwt_secret(), algorithm="HS256")
+    """與舊測試相容的別名。"""
+    return create_access_token(user_id)
 
 
 def _decode_access_token(token: str) -> int:
-    try:
-        payload = jwt.decode(token, _jwt_secret(), algorithms=["HS256"])
-    except jwt.ExpiredSignatureError as exc:
-        raise HTTPException(401, "登入已過期") from exc
-    except jwt.PyJWTError as exc:
-        raise HTTPException(401, "未授權") from exc
-    sub = payload.get("sub")
-    if not sub:
-        raise HTTPException(401, "未授權")
-    try:
-        return int(sub)
-    except ValueError as exc:
-        raise HTTPException(401, "未授權") from exc
+    return decode_access_token(token)
 
 
-def _set_auth_cookie(resp: Response, token: str) -> None:
-    resp.set_cookie(
-        key=JWT_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        secure=_cookie_secure(),
-        samesite=_cookie_samesite(),
-        max_age=JWT_TTL_DAYS * 24 * 60 * 60,
-        path="/",
+def _perform_logout(request: Request, response: Response, db: Session) -> None:
+    uid = resolve_user_for_logout(
+        db,
+        request.cookies.get(access_cookie_name()),
+        request.cookies.get(refresh_cookie_name()),
     )
-
-
-def _clear_auth_cookie(resp: Response) -> None:
-    # Keep attributes aligned with set_cookie so browsers reliably remove it.
-    resp.delete_cookie(
-        key=JWT_COOKIE_NAME,
-        path="/",
-        httponly=True,
-        secure=_cookie_secure(),
-        samesite=_cookie_samesite(),
-    )
+    if uid is not None:
+        revoke_all_refresh_for_user(db, uid)
+    clear_session_cookies(response)
 
 
 def _legacy_user_shape(user: User) -> dict:
@@ -270,7 +232,7 @@ app.add_middleware(
 )
 
 app.include_router(
-    create_oauth_router(_create_access_token, _set_auth_cookie),
+    create_oauth_router(issue_auth_session),
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -870,7 +832,7 @@ def list_services_by_category(db: Session = Depends(get_db)):
 
 
 def _get_current_user_from_cookie(request: Request, db: Session) -> User:
-    token = request.cookies.get(JWT_COOKIE_NAME)
+    token = request.cookies.get(access_cookie_name())
     if not token:
         raise HTTPException(401, "請先登入")
     user_id = _decode_access_token(token)
@@ -898,8 +860,7 @@ def legacy_login(payload: LegacyLoginRequest, response: Response, db: Session = 
     if not pwd_context.verify(payload.password, user.password_hash):
         raise HTTPException(401, "密碼錯誤")
 
-    token = _create_access_token(user.id)
-    _set_auth_cookie(response, token)
+    issue_auth_session(db, response, user.id)
     return LegacyLoginResponse(message="登入成功", user=_legacy_user_shape(user))
 
 
@@ -927,14 +888,29 @@ def legacy_register(payload: LegacyRegisterRequest, response: Response, db: Sess
         raise HTTPException(400, "註冊失敗，請稍後再試")
     db.refresh(user)
 
-    token = _create_access_token(user.id)
-    _set_auth_cookie(response, token)
+    issue_auth_session(db, response, user.id)
     return LegacyLoginResponse(message="註冊並登入成功", user=_legacy_user_shape(user))
 
 
+@app.post("/auth/refresh")
+def auth_refresh(request: Request, response: Response, db: Session = Depends(get_db)):
+    raw = request.cookies.get(refresh_cookie_name())
+    if not raw:
+        clear_session_cookies(response)
+        raise HTTPException(401, "請重新登入")
+    refresh_session(db, response, raw)
+    return {"message": "ok"}
+
+
+@app.post("/auth/logout")
+def auth_logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    _perform_logout(request, response, db)
+    return {"message": "登出成功"}
+
+
 @app.get("/logout")
-def legacy_logout(response: Response):
-    _clear_auth_cookie(response)
+def legacy_logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    _perform_logout(request, response, db)
     return {"message": "登出成功"}
 
 
@@ -949,7 +925,7 @@ def legacy_delete_account(request: Request, response: Response, db: Session = De
     db.query(Booking).filter(Booking.user_id == user.id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
-    _clear_auth_cookie(response)
+    clear_session_cookies(response)
     return {"message": "帳號已刪除"}
 
 

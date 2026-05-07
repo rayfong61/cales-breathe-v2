@@ -1,12 +1,11 @@
-import axios from "axios";
 import { useState, useEffect } from "react";
 import { useAuth } from "../components/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { api, apiBaseURL } from "../api/client";
 
 const isLineWebview = /Line\//i.test(navigator.userAgent);
 
 function BookingClientContent() {
-  const api = import.meta.env.VITE_API_BASE;
   const navigate = useNavigate();
   const { user, setUser, loading } = useAuth();
   const [bookingData, setBookingData] = useState(null);
@@ -88,14 +87,14 @@ function BookingClientContent() {
   useEffect(() => {
     const fetchServices = async () => {
       try {
-        const res = await axios.get(`${api}/services`);
+        const res = await api.get("/services");
         setServiceCatalog(Array.isArray(res.data) ? res.data : []);
       } catch (err) {
         console.error("取得服務清單失敗", err);
       }
     };
     fetchServices();
-  }, [api]);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -165,14 +164,14 @@ function BookingClientContent() {
       // 1. 非 owner 情境才更新當前登入者資料。
       // owner 代客預約（會員/訪客）避免誤改到業主自己的姓名/手機。
       if (user?.role !== "owner") {
-        await axios.put(`${api}/account/update2`, {
+        await api.put("/account/update2", {
           client_name: trimmedName,
           contact_mobile: trimmedMobile,
-        }, { withCredentials: true });
+        });
       }
 
       // 2. 提交預約資料
-      await axios.post(`${api}/bookings`, payload, { withCredentials: true });
+      await api.post("/bookings", payload);
 
       setIsSubmitted(true);
       localStorage.removeItem("bookingData");
@@ -210,9 +209,8 @@ function BookingClientContent() {
       return;
     }
     try {
-      const res = await axios.get(`${api}/customers/search`, {
+      const res = await api.get("/customers/search", {
         params: { q },
-        withCredentials: true,
       });
       setCustomerResults(res.data || []);
     } catch (err) {
@@ -225,19 +223,19 @@ function BookingClientContent() {
   // opener 斷線導致 postMessage 失敗、登入 cookie 與父頁不同步。
   const handleGoogleLogin = () => {
     const fo = encodeURIComponent(window.location.origin);
-    window.location.href = `${api}/auth/google?redirect=/booking-step3&frontend_origin=${fo}`;
+    window.location.href = `${apiBaseURL}/auth/google?redirect=/booking-step3&frontend_origin=${fo}`;
   };
 
   const handleLineLogin = () => {
     const fo = encodeURIComponent(window.location.origin);
-    window.location.href = `${api}/auth/line?redirect=/booking-step3&frontend_origin=${fo}`;
+    window.location.href = `${apiBaseURL}/auth/line?redirect=/booking-step3&frontend_origin=${fo}`;
   };
 
   const handleLogin = async (e) => {
     e.preventDefault();
   
     try {
-      const res = await fetch(`${api}/login`, {
+      const res = await fetch(`${apiBaseURL}/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
