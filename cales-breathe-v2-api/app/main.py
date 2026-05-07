@@ -16,6 +16,8 @@ import mimetypes
 import os
 from uuid import uuid4
 
+import redis
+
 import httpx
 from fastapi import (
     BackgroundTasks,
@@ -67,6 +69,8 @@ from app.schemas import (
 
 from app.oauth import create_oauth_router
 from app.docs_access import add_docs_basic_auth_middleware, docs_fastapi_kwargs
+from app.rate_limiter import RateLimiter
+from app.rate_limit_decorators import rate_limit_login
 
 # 分類顯示順序（對應選單）
 CATEGORY_ORDER = [
@@ -187,6 +191,28 @@ async def lifespan(app: FastAPI):
             db.close()
     except Exception as e:
         print(f"[lifespan] DB 初始化失敗，服務仍繼續啟動：{e}")
+
+    # 初始化 Redis / RateLimiter（若 REDIS_URL 未設定則略過，採 fail-open）
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    app.state.login_rate_limiter = None
+    if redis_url:
+        try:
+            redis_client = redis.Redis.from_url(redis_url)
+            bucket_capacity = int(os.getenv("LOGIN_RATE_LIMIT_BUCKET_CAPACITY", "5"))
+            fill_rate_per_sec = float(os.getenv("LOGIN_RATE_LIMIT_FILL_RATE_PER_SEC", "0.0333"))
+            app.state.login_rate_limiter = RateLimiter(
+                redis_client=redis_client,
+                bucket_capacity=bucket_capacity,
+                fill_rate_per_sec=fill_rate_per_sec,
+                key_prefix="rate",
+            )
+            print(
+                f"[lifespan] Login RateLimiter 啟用：bucket_capacity={bucket_capacity}, "
+                f"fill_rate_per_sec={fill_rate_per_sec}, redis_url={redis_url}"
+            )
+        except Exception as e:
+            # Redis 錯誤不應阻止服務啟動；限流會自動 fail-open。
+            print(f"[lifespan] 初始化 Redis/RateLimiter 失敗，登入限流停用：{e}")
 
     task = asyncio.create_task(_keep_alive_loop())
     yield
@@ -853,7 +879,13 @@ def me(request: Request, db: Session = Depends(get_db)):
 
 
 @app.post("/login", response_model=LegacyLoginResponse)
-def legacy_login(payload: LegacyLoginRequest, response: Response, db: Session = Depends(get_db)):
+@rate_limit_login
+def legacy_login(
+    payload: LegacyLoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     user = (
         db.query(User)
         .filter(User.contact_mail == payload.contact_mail)

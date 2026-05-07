@@ -91,10 +91,22 @@ function Login() {
         credentials: "include", // 保持 cookie/session
         body: JSON.stringify({ contact_mail: contactMail, password }),
       });
+
+      const retryAfter = res.headers.get("Retry-After");
   
       if (!res.ok) {
-        const data = await res.json();
-        alert(data.message || "登入失敗");
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 429) {
+          const seconds = Number.parseInt(retryAfter || "", 10);
+          const waitText = Number.isFinite(seconds) ? `（請約 ${seconds} 秒後再試）` : "";
+          alert(`嘗試過多，請稍後再試${waitText}`);
+          return;
+        }
+        if (res.status === 401) {
+          alert("帳號或密碼錯誤");
+          return;
+        }
+        alert(data.detail || data.message || "登入失敗");
         return;
       }
   

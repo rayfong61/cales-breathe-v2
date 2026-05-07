@@ -14,3 +14,5 @@ python-multipart>=0.0.9
 boto3>=1.34.0
 google-api-python-client>=2.100.0
 google-auth>=2.23.0
+redis>=5.0.0
+fakeredis>=2.23.0
