@@ -102,6 +102,7 @@ def test_line_webhook_rejects_invalid_signature(client, monkeypatch):
 def test_line_webhook_processes_and_deduplicates_events(client, monkeypatch):
     monkeypatch.setattr(main_module, "_push_text_to_line_sync", lambda *a, **kw: None)
     monkeypatch.setenv("LINE_CHANNEL_SECRET", "test-secret")
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "fake-token")
     payload = {
         "events": [
             {"webhookEventId": "evt-1"},
