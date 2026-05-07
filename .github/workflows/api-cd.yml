@@ -45,7 +45,7 @@ jobs:
       - name: Build and push image
         run: |
           IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          docker build -f cales-breathe-v2-api/Dockerfile -t "$IMAGE_URI" .
+          docker build -f cales-breathe-v2-api/Dockerfile -t "$IMAGE_URI" cales-breathe-v2-api
           docker push "$IMAGE_URI"
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
 
