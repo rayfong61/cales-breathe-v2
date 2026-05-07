@@ -27,8 +27,7 @@ def test_login_without_redis_fallback_allows(client, monkeypatch):
     main_module.app.state.login_rate_limiter = None
 
     from app.models import User
-    from app.database import SessionLocal
-    from app.main import pwd_context
+    from app.main import SessionLocal, pwd_context
 
     db = SessionLocal()
     try:
@@ -61,8 +60,7 @@ def test_login_rate_limit_blocks_when_limiter_disallows(client, monkeypatch):
     main_module.app.state.login_rate_limiter = dummy
 
     from app.models import User
-    from app.database import SessionLocal
-    from app.main import pwd_context
+    from app.main import SessionLocal, pwd_context
 
     db = SessionLocal()
     try:
