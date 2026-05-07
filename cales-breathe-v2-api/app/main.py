@@ -66,6 +66,7 @@ from app.schemas import (
 )
 
 from app.oauth import create_oauth_router
+from app.docs_access import add_docs_basic_auth_middleware, docs_fastapi_kwargs
 
 # 分類顯示順序（對應選單）
 CATEGORY_ORDER = [
@@ -204,6 +205,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
     root_path="/api",
+    **docs_fastapi_kwargs(),
 )
 
 def _allowed_origins() -> list[str]:
@@ -230,6 +232,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+add_docs_basic_auth_middleware(app)
 
 app.include_router(
     create_oauth_router(issue_auth_session),
