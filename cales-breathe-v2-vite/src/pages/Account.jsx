@@ -287,17 +287,3 @@ function Account() {
 }
 
 export default Account;
-
-{/* 
-    姓名
-    生日
-    電話
-    LINE
-    地址
-    如何得知本店
-    是否有肌膚過敏史
-    平常除毛方式
-    平常去角質方式
-    是否有皮膚方面疾病
-    */}
-    */}
