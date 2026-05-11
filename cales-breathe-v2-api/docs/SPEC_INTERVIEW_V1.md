@@ -46,7 +46,7 @@
 | --- | --- |
 | 資料庫 | **雙模式**：無 `DATABASE_URL` 時可 **SQLite** 本機快速開發；Docker Compose／正式環境為 **PostgreSQL**（細節見 [SPECIFICATION.md](./SPECIFICATION.md) §3.1、`app/database.py`）。 |
 | Schema 遷移 | **Alembic 已導入**（`alembic/versions/`）；新環境以 `upgrade head` 為準（階段 D）。 |
-| 部署 | **Vercel**（前端 SPA）＋ **Google Cloud Run**（FastAPI）＋ **Supabase**（PostgreSQL）；根目錄 [README.md](../../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)。儲存庫內 `render.yaml` 僅為**歷史／可選**參考，避免與實際上線網址混淆。 |
+| 部署 | **Vercel**（前端 SPA）＋ **Google Cloud Run**（FastAPI）＋ **Supabase**（PostgreSQL）；總覽見根目錄 [README.md](../../README.md)，OAuth／Compose 等細節見 [README-legacy-root.md](../../docs/README-legacy-root.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)。儲存庫內 `render.yaml` 僅為**歷史／可選**參考，避免與實際上線網址混淆。 |
 | 本機一致性 | **Docker Compose**（Postgres + API + NGINX gateway），見根目錄 `docker-compose.yml`。 |
 | 整合 demo | **真實** LINE / Google 憑證可演示（機密僅環境變數，不入庫）。 |
 
@@ -164,7 +164,7 @@
 
 ## 9. 部署與環境
 
-- **正式**：**Vercel**（前端）＋ **Google Cloud Run**（API）＋ **Supabase**（DB）；`api-cd.yml` 已串接 OIDC/WIF 自動部署，環境變數與路由見根 [README.md](../../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)。
+- **正式**：**Vercel**（前端）＋ **Google Cloud Run**（API）＋ **Supabase**（DB）；`api-cd.yml` 已串接 OIDC/WIF 自動部署。環境變數與路由總覽見根 [README.md](../../README.md)；逐步指令與本機注意事項見 [README-legacy-root.md](../../docs/README-legacy-root.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)。
 - **Docker**：`Dockerfile` 與根目錄 `docker-compose.yml`（Postgres + API + gateway）提升本機與概念上一致性。
 - **`.env.example`**：列出 `DATABASE_URL`、`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、Google 憑證相關鍵名等（不含真值）。
 

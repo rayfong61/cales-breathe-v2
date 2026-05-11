@@ -2,7 +2,7 @@
 
 > **總覽**：本機與雲端部署對照請先讀 [`本地與雲端部署.md`](本地與雲端部署.md)。
 
-本文件描述 monorepo 內以 **Docker Compose** 進行**本機整合測試**之主線。正式環境為 **Vercel ＋ Cloud Run ＋ Supabase**（見 [`本地與雲端部署.md`](本地與雲端部署.md)）；曾規劃以 **GCP VM** 承載與 compose 類似之單機架構，**已取消**。實作細節以根目錄 [`README.md`](../README.md)、[`docker-compose.yml`](../docker-compose.yml) 為準。
+本文件描述 monorepo 內以 **Docker Compose** 進行**本機整合測試**之主線。正式環境為 **Vercel ＋ Cloud Run ＋ Supabase**（見 [`本地與雲端部署.md`](本地與雲端部署.md)）；曾規劃以 **GCP VM** 承載與 compose 類似之單機架構，**已取消**。實作細節以 [`README-legacy-root.md`](README-legacy-root.md)、[`docker-compose.yml`](../docker-compose.yml) 為準（根目錄 [`README.md`](../README.md) 為面試總覽）。
 
 ---
 

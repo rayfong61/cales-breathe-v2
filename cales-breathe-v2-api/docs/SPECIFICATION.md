@@ -13,7 +13,7 @@
 | [NOTES.md](../NOTES.md) | 商業目標、角色、功能需求長文、舊專案連結 |
 | 本規格書 | **工程階段、驗收條件、API/資料現況、環境變數** |
 | [SPEC_INTERVIEW_V1.md](./SPEC_INTERVIEW_V1.md) | **面試目標規格**：MVP 邊界、商業規則決策、Demo 與技術路徑摘要 |
-| [README.md](../README.md) | 如何啟動、指令入口 |
+| [README.md](../README.md)（總覽）／[README-legacy-root.md](../../docs/README-legacy-root.md)（本機 Compose、OAuth、Webhook、限流等指令） | 專案入口與啟動說明 |
 | [PROJECT_DOCS_AND_GIT.md](./PROJECT_DOCS_AND_GIT.md) | 文件清單與 Git 版本控制慣例 |
 
 ---

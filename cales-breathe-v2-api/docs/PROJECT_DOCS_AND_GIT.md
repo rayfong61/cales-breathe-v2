@@ -9,7 +9,7 @@
 
 | 檔案 | 用途 | 維護時機 |
 | --- | --- | --- |
-| [README.md](../README.md) | 如何安裝、啟動、主要連結入口 | 指令變更、重要連結增刪 |
+| [README.md](../README.md)、[README-legacy-root.md](../../docs/README-legacy-root.md) | 對外總覽；本機／部署指令與環境變數長文（存檔） | 指令或入口敘事變更時 |
 | [NOTES.md](../NOTES.md) | 產品構想、角色、舊專案關係、學習路線 | 需求或商業敘事變更 |
 | [docs/SPECIFICATION.md](./SPECIFICATION.md) | **規格書**：API、商業規則、階段 A–J、環境變數 | API/規則/階段完成時更新 |
 | [docs/SPEC_INTERVIEW_V1.md](./SPEC_INTERVIEW_V1.md) | **面試目標規格**：MVP、Demo、24h 取消等決策與驗收摘要 | 面試範圍或目標規則變更時 |
@@ -31,7 +31,7 @@
 
 ### 建議（上線與整合）
 
-- [ ] **部署說明**：現行路線見根目錄 [README.md](../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)（Vercel、Cloud Run、Supabase、Docker）；歷史或選型參考另見 `DEPLOYMENT_STATUS.md`、`render.yaml`
+- [ ] **部署說明**：現行路線見根目錄 [README.md](../README.md)、[本地與雲端部署.md](../../docs/本地與雲端部署.md)；本機指令存檔 [README-legacy-root.md](../../docs/README-legacy-root.md)（Vercel、Cloud Run、Supabase、Docker）；歷史或選型參考另見 `DEPLOYMENT_STATUS.md`、`render.yaml`
 - [ ] **架構圖或資料流**（一頁即可）：LINE → API → DB → Google Calendar；可放 `docs/` 或 README
 
 ### 選用（團隊變大時）
@@ -106,4 +106,4 @@
 - [開發規格書（階段驗收、API）](./SPECIFICATION.md)
 - [面試目標規格書](./SPEC_INTERVIEW_V1.md)
 - [專案背景與需求長文](../NOTES.md)
-- [README（快速開始）](../README.md)
+- [README（總覽）](../README.md) · [本機／部署存檔](../../docs/README-legacy-root.md)

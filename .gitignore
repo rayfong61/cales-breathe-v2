@@ -62,4 +62,11 @@ cales-breathe-v2-api/app.db
 # --- Git metadata accidentally created inside subfolders ---
 **/.git/
 
+.env.example
+
+docs/
+
+cales-breathe-v2-api/docs/
+cales-breathe-v2-api/notes/
+
 
