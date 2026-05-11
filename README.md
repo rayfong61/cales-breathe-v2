@@ -2,6 +2,8 @@
 
 現代化美容／熱蠟除毛預約平台，支援線上預約、會員與 OAuth 登入、**Google Calendar** 同步、**LINE Messaging** 通知與 Webhook，以及業主端預約／顧客管理相關 API。本專案為 **monorepo**：前後端分離，並以 **GitHub Actions CI/CD**、**Docker** 與 **Google Cloud Run／Vercel** 完成可重現的開發與部署流程。
 
+**Demo（前端，Vercel）**：[https://cales-breathe-v2.vercel.app/](https://cales-breathe-v2.vercel.app/)
+
 ---
 
 ## Tech Stack
@@ -212,33 +214,85 @@ GitHub Actions（api-ci.yml）
 
 ## Environment Variables
 
-後端於 **`cales-breathe-v2-api/.env`** 設定（**勿提交含真值之 `.env`** 至版本庫）。
+**後端** 使用 **`cales-breathe-v2-api/.env`**，**前端** 使用 **`cales-breathe-v2-vite/.env`**；兩者皆**勿提交含真值之 `.env`** 至版本庫。各目錄的 **`*.env.example`** 為建議複製起點。
 
-**常見鍵名**
+### 後端（FastAPI，`cales-breathe-v2-api/.env`）
 
-```
-DATABASE_URL=
-JWT_SECRET=
-FRONTEND_PUBLIC_ORIGIN=
-API_PUBLIC_BASE_URL=
-COOKIE_SECURE=
-COOKIE_SAMESITE=
-GOOGLE_OAUTH_CLIENT_ID=
-GOOGLE_OAUTH_CLIENT_SECRET=
-LINE_CHANNEL_SECRET=
-LINE_CHANNEL_ACCESS_TOKEN=
-LINE_LOGIN_CHANNEL_ID=
-LINE_LOGIN_CHANNEL_SECRET=
-GOOGLE_SERVICE_ACCOUNT_JSON=
-GOOGLE_CALENDAR_ID=
-REDIS_URL=
-```
+完整範本、區塊註解與本機／gateway 兩種公開網址組合見 **`cales-breathe-v2-api/.env.example`**。
+
+#### 依用途一覽
+
+| 變數 | 說明 |
+|------|------|
+| `LINE_CHANNEL_SECRET` | LINE Messaging **Webhook 驗簽**（必要；與 Developers 頻道 Secret 一致） |
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Messaging **回覆／推播**（Channel access token） |
+| `JWT_SECRET` | JWT **HS256** 簽章（登入 HttpOnly Cookie）；請使用足夠長的隨機字串 |
+| `COOKIE_SECURE` | Cookie **Secure** 開關（本機 HTTP 多為 `false`） |
+| `COOKIE_SAMESITE` | Cookie **SameSite**（本機多為 `lax`；HTTPS 跨站情境再調） |
+| `DATABASE_URL` | SQLAlchemy 連線字串；本機可 **SQLite**；正式多為 **PostgreSQL**（如 Supabase pooler） |
+| `GOOGLE_OAUTH_CLIENT_ID` | Google 登入 OAuth（亦相容 `GOOGLE_CLIENT_ID`） |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Google 登入 OAuth（亦相容 `GOOGLE_CLIENT_SECRET`） |
+| `LINE_LOGIN_CHANNEL_ID` | LINE Login 頻道 ID（與 Messaging 可不同） |
+| `LINE_LOGIN_CHANNEL_SECRET` | LINE Login 頻道 Secret |
+| `FRONTEND_PUBLIC_ORIGIN` | 前端公開 origin（OAuth、CORS、Cookie；須與瀏覽器網址一致） |
+| `API_PUBLIC_BASE_URL` | 對外 API 基底網址（OAuth callback 路徑前綴） |
+| `STORAGE_BACKEND` | 檔案儲存：`local` 或 **`r2`**（Cloudflare R2） |
+| `R2_ACCOUNT_ID` | R2 帳號 ID（`STORAGE_BACKEND=r2` 時必填） |
+| `R2_ACCESS_KEY_ID` | R2 Access Key |
+| `R2_SECRET_ACCESS_KEY` | R2 Secret |
+| `R2_BUCKET` | R2 Bucket 名稱 |
+| `R2_PUBLIC_BASE_URL` | 對外讀取檔案的公開基底 URL |
+| `R2_KEY_PREFIX` | 物件 key 前綴（例：`uploads`） |
+| `OWNER_LINE_USER_ID` | 業主 LINE User ID（新預約推播等） |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Google Calendar：**服務帳號 JSON** 字串或路徑（選用） |
+| `GOOGLE_CALENDAR_ID` | 目標日曆 ID（常為 `primary`） |
+| `REDIS_URL` | **Redis** 連線（登入限流等）；未設定則相關功能可能停用 |
+| `LOGIN_RATE_LIMIT_BUCKET_CAPACITY` | 登入 **Token Bucket** 容量 |
+| `LOGIN_RATE_LIMIT_FILL_RATE_PER_SEC` | 登入 Token Bucket 每秒補充率 |
+
+#### 選用／進階
+
+| 變數 | 說明 |
+|------|------|
+| `ACCESS_TOKEN_TTL_MINUTES` | Access token 有效分鐘數 |
+| `REFRESH_TOKEN_TTL_DAYS` | Refresh token 有效天數 |
+| `ACCESS_TOKEN_COOKIE_NAME` / `REFRESH_TOKEN_COOKIE_NAME` | Cookie 名稱覆寫 |
+| `ENVIRONMENT` / `APP_ENV` | 設為 `production` 觸發正式環境行為（如 API 文件預設關閉） |
+| `DOCS_BASIC_USER` / `DOCS_BASIC_PASSWORD` | 正式環境仍要開 **`/docs`** 時的 **HTTP Basic** 帳密 |
+| `DISABLE_API_DOCS` | 設為 `1`／`true` 等可強制關閉文件路由 |
+| `DB_CONNECT_TIMEOUT`、`DB_POOL_SIZE`、`DB_MAX_OVERFLOW`、`DB_POOL_TIMEOUT`、`DB_POOL_RECYCLE` | PostgreSQL **連線池** 微調 |
 
 **本機 HTTP**：`COOKIE_SECURE=false`、`COOKIE_SAMESITE=lax`。**HTTPS 正式站**：通常 `COOKIE_SECURE=true`，並依跨網域需求調整 `SameSite`。
 
 **Docker Compose**：根目錄 compose 會以 **`POSTGRES_*`** 組出 **`DATABASE_URL`** 覆寫後端，使本機與正式環境同為 Postgres。
 
-**Production API 文件**：`ENVIRONMENT=production` 時，未設 **`DOCS_BASIC_USER`／`DOCS_BASIC_PASSWORD`** 則 **`/docs`**、**`/openapi.json`** 預設關閉；可設帳密啟用 HTTP Basic，或以 **`DISABLE_API_DOCS=1`** 強制關閉。
+**Production API 文件**：`ENVIRONMENT=production`（或 `APP_ENV=production`）時，未設 **`DOCS_BASIC_USER`／`DOCS_BASIC_PASSWORD`** 則 **`/docs`**、**`/redoc`**、**`/openapi.json`** 預設關閉；可設帳密啟用 HTTP Basic，或以 **`DISABLE_API_DOCS=1`** 強制關閉。
+
+### 前端（Vite，`cales-breathe-v2-vite/.env`）
+
+僅 **`VITE_*`** 會在 **`npm run dev`**／**`npm run build`** 時由 Vite 編入前端 bundle，**勿在鍵名外洩敏感後端金鑰**（後端秘密應只放在 API 的 `.env`）。完整範本與模式 A／B 網址說明見 **`cales-breathe-v2-vite/.env.example`**。
+
+**Docker Compose（NGINX gateway 映像）**：gateway 建置時讀的是 **repo 根目錄**的 `.env`（見根目錄 **`.env.example`** 內 **`VITE_*`**），**不是** `cales-breathe-v2-vite/.env`；若只改子目錄檔案，請以本機 `npm run build` 驗證；走 compose 請改根目錄並**重建 gateway**。
+
+| 變數 | 說明 |
+|------|------|
+| `VITE_API_BASE` | 瀏覽器呼叫 API 的基底網址（**勿結尾斜線**）。本機直連後端例：`http://127.0.0.1:8000`；經 gateway 同網域例：`http://localhost/api`（gateway 埠非 80 時如 `http://localhost:8080/api`） |
+| `VITE_LINE_ADD_FRIEND_URL` | LINE **加好友**等外部連結（登入／預約等頁面引用） |
+
+**與後端對齊**：`VITE_API_BASE` 必須與實際可達的 API 前綴一致（對照後端 **`API_PUBLIC_BASE_URL`** 與下文 **API Example**）；OAuth 與 Cookie 網域則以後端 **`FRONTEND_PUBLIC_ORIGIN`** 為準。
+
+### GitHub Actions（部署 Cloud Run，非後端 `.env`）
+
+下列為 **Repository Secrets**（`.github/workflows/api-cd.yml`），於 GitHub **Settings → Secrets and variables → Actions** 設定；**本機 FastAPI 不從 `.env` 讀取**。
+
+| Secret | 說明 |
+|--------|------|
+| `GCP_PROJECT_ID` | GCP 專案 ID |
+| `GCP_REGION` | 部署區域（亦用於 Artifact Registry host） |
+| `GAR_REPOSITORY` | Artifact Registry repository 名稱 |
+| `CLOUD_RUN_SERVICE` | Cloud Run 服務名稱 |
+| `GCP_WIF_PROVIDER` | Workload Identity Federation **Provider** 完整資源名稱 |
+| `GCP_SA_EMAIL` | 綁定之 **服務帳號** email（OIDC 交換後身分） |
 
 ---
 
