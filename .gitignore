@@ -62,11 +62,8 @@ cales-breathe-v2-api/app.db
 # --- Git metadata accidentally created inside subfolders ---
 **/.git/
 
-.env.example
-
+# --- 面試／本機備忘（不推上遠端；僅本機保留）---
 docs/
-
 cales-breathe-v2-api/docs/
 cales-breathe-v2-api/notes/
-
 

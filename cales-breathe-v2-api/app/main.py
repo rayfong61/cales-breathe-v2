@@ -158,8 +158,12 @@ def _legacy_user_shape(user: User) -> dict:
     }
 
 
+def _is_keep_alive_enabled() -> bool:
+    return os.getenv("ENABLE_KEEP_ALIVE", "").strip().lower() in ("1", "true", "yes")
+
+
 async def _keep_alive_loop():
-    """每 10 分鐘 ping 自己的 /health，避免 Render 免費方案進入休眠。"""
+    """每 10 分鐘 ping 自己的 /health（僅 ENABLE_KEEP_ALIVE=true 時啟動；Cloud Run 預設關閉）。"""
     api_base = os.getenv("API_PUBLIC_BASE_URL", "").strip().rstrip("/")
     if not api_base:
         print("[keep_alive] API_PUBLIC_BASE_URL 未設定，略過自動 ping")
@@ -214,13 +218,19 @@ async def lifespan(app: FastAPI):
             # Redis 錯誤不應阻止服務啟動；限流會自動 fail-open。
             print(f"[lifespan] 初始化 Redis/RateLimiter 失敗，登入限流停用：{e}")
 
-    task = asyncio.create_task(_keep_alive_loop())
+    keep_alive_task = None
+    if _is_keep_alive_enabled():
+        keep_alive_task = asyncio.create_task(_keep_alive_loop())
+        print("[lifespan] ENABLE_KEEP_ALIVE=true，已啟動每 10 分鐘 /health ping")
+    else:
+        print("[lifespan] 未啟用 ENABLE_KEEP_ALIVE，略過容器內定期 ping")
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    if keep_alive_task is not None:
+        keep_alive_task.cancel()
+        try:
+            await keep_alive_task
+        except asyncio.CancelledError:
+            pass
 
 
 # Docker gateway 會把外部路徑 `/api/*` 反代到後端 FastAPI 的根路徑。
@@ -783,7 +793,7 @@ def _process_line_webhook_event(event: dict, access_token: str) -> None:
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
-    """健康檢查（含 DB ping，同時防止 Render 休眠與 Supabase 7 天暫停）"""
+    """健康檢查（含 DB ping）。定期保活請用外部排程，勿依賴容器內 keep-alive。"""
     try:
         db.execute(text("SELECT 1"))
         db_status = "ok"
